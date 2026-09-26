@@ -11,6 +11,7 @@ import { AuthModal } from "./components/AuthModal";
 import Dashboard from "./pages/Dashboard";
 import Home from "./pages/Home";
 import { SEO_PRESETS } from "./lib/seoPresets";
+import { ScrollToTop } from "./components/ScrollToTop";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -52,6 +53,7 @@ function App() {
               <Router />
               <UpgradeModal />
               <AuthModal />
+              <ScrollToTop />
             </TooltipProvider>
           </ProProvider>
         </AuthProvider>
