@@ -1107,22 +1107,29 @@ export function registerDownloadProxy(app: Express) {
 
       console.log(`[DOWNLOAD] Incoming request: formatId=${payload.formatId}, container=${payload.container}, isYouTube=${isYouTube}, isImage=${isImage}, method=${req.method}`);
 
-      // Images (e.g., YouTube thumbnails/covers) should NEVER be piped to yt-dlp/ffmpeg video streamer!
-      if (!isImage && payload.audioUrl && (payload.url.includes("pot=") || !isYouTube)) {
-        return mergeVideoAudioWithFfmpeg(payload, req, res, token);
-      }
-      if (!isImage && payload.url.includes("pot=") && !payload.audioUrl) {
+      // Images (e.g., YouTube thumbnails/covers) should ALWAYS be handled by direct HTTP proxy
+      if (isImage) {
         return await proxyHttpMedia(payload, req, res, token);
       }
-      if (!isImage && isYouTube && payload.sourceUrl) {
+
+      // YouTube video and audio should ALWAYS route through streamYouTubeWithYtDlp using authorized HLS
+      // to avoid Google Video 403 Forbidden datacenter blocks
+      if (isYouTube && payload.sourceUrl) {
         return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, payload.container, token, payload.expectedSize);
       }
-      if (!isImage && (payload.container === "hls" || payload.container === "dash")) return proxyManifestWithFfmpeg(payload, res);
-      if (!isImage && payload.audioUrl) return mergeVideoAudioWithFfmpeg(payload, req, res, token);
+
+      if (payload.audioUrl) {
+        return mergeVideoAudioWithFfmpeg(payload, req, res, token);
+      }
+
+      if (payload.container === "hls" || payload.container === "dash") {
+        return proxyManifestWithFfmpeg(payload, res);
+      }
+
       try {
         await proxyHttpMedia(payload, req, res, token);
       } catch (proxyError) {
-        if (!isImage && payload.sourceUrl && !res.headersSent) {
+        if (payload.sourceUrl && !res.headersSent) {
           console.warn("[DOWNLOAD] proxyHttpMedia failed, falling back to streaming with yt-dlp:", proxyError);
           return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, payload.container, token, payload.expectedSize);
         }

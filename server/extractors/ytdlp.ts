@@ -398,6 +398,13 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
     console.error("[extractWithYtDlp error]:", message);
 
     // Platform-specific fallbacks before failing
+    if (platform === "TikTok") {
+      try {
+        const ttResult = (await extractTikTokFallback(targetUrl)) || (await extractTikTokFallback(inputUrl));
+        if (ttResult) return ttResult;
+      } catch {}
+    }
+
     if (platform === "X") {
       try {
         const fbResult = await extractTwitterFallback(targetUrl);
@@ -486,6 +493,114 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
       throw new Error(`This ${platform} video is age-restricted and could not be accessed with the current session cookies.`);
     }
     throw new Error(`We couldn't extract downloadable media from this ${platform} post. Check that it is public and the URL is correct.`);
+  }
+}
+
+export async function extractTikTokFallback(url: string): Promise<ExtractedMedia | null> {
+  try {
+    const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`;
+    const res = await fetch(apiUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as any;
+    if (json.code !== 0 || !json.data) return null;
+
+    const data = json.data;
+    const formats: ExtractedFormat[] = [];
+    const thumbnails: Array<{ url: string; width?: number; height?: number; id?: string }> = [];
+
+    if (data.cover) {
+      thumbnails.push({ url: data.cover, id: "cover" });
+    }
+
+    // Photo carousel / slideshow
+    if (Array.isArray(data.images) && data.images.length > 0) {
+      data.images.forEach((imgUrl: string, idx: number) => {
+        if (imgUrl && typeof imgUrl === "string") {
+          formats.push({
+            id: `photo-${idx + 1}`,
+            url: imgUrl,
+            ext: "jpg",
+            vcodec: "none",
+            acodec: "none",
+            formatNote: `Photo ${idx + 1}`,
+            httpHeaders: { Referer: "https://www.tiktok.com/" },
+          });
+          thumbnails.push({ url: imgUrl, id: `item-${idx + 1}` });
+        }
+      });
+    }
+
+    // Video streams
+    if (data.hdplay) {
+      formats.push({
+        id: "tiktok-hd",
+        url: data.hdplay,
+        ext: "mp4",
+        vcodec: "h264",
+        acodec: "aac",
+        formatNote: "HD No Watermark",
+        httpHeaders: { Referer: "https://www.tiktok.com/" },
+      });
+    }
+    if (data.play) {
+      formats.push({
+        id: "tiktok-nowm",
+        url: data.play,
+        ext: "mp4",
+        vcodec: "h264",
+        acodec: "aac",
+        filesize: data.size || undefined,
+        formatNote: "No Watermark",
+        httpHeaders: { Referer: "https://www.tiktok.com/" },
+      });
+    }
+    if (data.wmplay && formats.length === 0) {
+      formats.push({
+        id: "tiktok-wm",
+        url: data.wmplay,
+        ext: "mp4",
+        vcodec: "h264",
+        acodec: "aac",
+        filesize: data.wm_size || undefined,
+        formatNote: "Watermark",
+        httpHeaders: { Referer: "https://www.tiktok.com/" },
+      });
+    }
+
+    // Audio stream
+    if (data.music) {
+      formats.push({
+        id: "tiktok-audio",
+        url: data.music,
+        ext: "mp3",
+        vcodec: "none",
+        acodec: "mp3",
+        formatNote: data.music_info?.title ? `Audio · ${data.music_info.title}` : "Original Audio",
+        httpHeaders: { Referer: "https://www.tiktok.com/" },
+      });
+    }
+
+    if (formats.length === 0 && thumbnails.length === 0) return null;
+
+    return {
+      id: data.id || "tiktok-media",
+      title: data.title || "TikTok Video",
+      uploader: data.author?.nickname || data.author?.unique_id || "TikTok Creator",
+      duration: typeof data.duration === "number" ? data.duration : undefined,
+      thumbnail: data.cover,
+      thumbnails: thumbnails.length > 0 ? thumbnails : undefined,
+      webpageUrl: url,
+      platform: "TikTok",
+      formats,
+    };
+  } catch (err) {
+    console.warn("[extractTikTokFallback error]:", err);
+    return null;
   }
 }
 
