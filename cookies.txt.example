@@ -1,0 +1,9 @@
+# CBdrop Netscape Cookies File (Optional)
+#
+# If you need to download age-restricted (18+), private, or members-only videos:
+# 1. Export your cookies from your browser using an extension (such as "Get cookies.txt LOCALLY").
+# 2. Save the file as `cookies.txt` in the cbdrop root directory.
+# 3. CBdrop will automatically load and use `cookies.txt` for yt-dlp extractions.
+#
+# Example format:
+# .youtube.com	TRUE	/	TRUE	1750000000	LOGIN_INFO	...

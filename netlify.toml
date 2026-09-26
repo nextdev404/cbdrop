@@ -1,0 +1,23 @@
+# Netlify Configuration for CBdrop
+
+[build]
+  command = "npm run build"
+  publish = "client/dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Optional: If your backend is hosted on Render, Railway, or a VPS,
+# you can proxy API calls directly through Netlify so there are no CORS issues:
+# [[redirects]]
+#   from = "/api/*"
+#   to = "https://your-cbdrop-backend.onrender.com/api/:splat"
+#   status = 200
+#   force = true
+
+# Single Page Application (SPA) redirect rule
+# Ensures client-side routing (Wouter) works on page refreshes
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

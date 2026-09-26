@@ -1,0 +1,10 @@
+services:
+  cbdrop:
+    build: .
+    container_name: cbdrop
+    restart: unless-stopped
+    ports:
+      - "80:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
