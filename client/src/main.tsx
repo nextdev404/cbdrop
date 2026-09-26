@@ -8,6 +8,10 @@ import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
 
+if (typeof window !== "undefined" && "scrollRestoration" in window.history) {
+  window.history.scrollRestoration = "manual";
+}
+
 const queryClient = new QueryClient();
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {

@@ -377,6 +377,37 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     }
   }, [preset]);
 
+  // When the user loads or refreshes the site, always show the URL input place at the top
+  useEffect(() => {
+    if ("scrollRestoration" in window.history) {
+      window.history.scrollRestoration = "manual";
+    }
+
+    // Scroll to the very top immediately
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+
+    // Clean up any anchor hash like #results from previous interaction
+    if (window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+
+    // Ensure the input place is visible and focused
+    const timer = window.setTimeout(() => {
+      window.scrollTo(0, 0);
+      inputRef.current?.focus({ preventScroll: true });
+    }, 60);
+
+    const handleBeforeUnload = () => {
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
   function isFormatPro(format: Format) {
     const q = format.quality.toLowerCase();
     return q.includes("4k") || q.includes("2160") || q.includes("1440") || q.includes("1080p60") || q.includes("320");
