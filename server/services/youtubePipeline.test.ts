@@ -114,12 +114,17 @@ describe("YouTube video and audio pipeline verification", () => {
     const formatArg = ytdlpCall.args[fIdx + 1];
     expect(formatArg).toMatch(/^270\+/);
     expect(formatArg).toContain("137+");
+    expect(formatArg).not.toContain("/18/");
+    expect(formatArg).toContain("[height<=1080]");
 
-    // ffmpeg converts/muxes video into MP4
+    // ffmpeg converts/muxes video into MP4 with default_base_moof for Finder QuickLook compatibility
     expect(ffmpegCall.args).toContain("-c:v");
     expect(ffmpegCall.args).toContain("copy");
     expect(ffmpegCall.args).toContain("-c:a");
     expect(ffmpegCall.args).toContain("aac");
+    const movflagsIdx = ffmpegCall.args.indexOf("-movflags");
+    expect(movflagsIdx).toBeGreaterThanOrEqual(0);
+    expect(ffmpegCall.args[movflagsIdx + 1]).toContain("default_base_moof");
   });
 
   it("verifies 720p MP4 YouTube downloads route to yt-dlp with authorized HLS format '232'", () => {
@@ -133,13 +138,18 @@ describe("YouTube video and audio pipeline verification", () => {
     );
 
     expect(spawnCalls.length).toBe(2);
-    const [ytdlpCall] = spawnCalls;
+    const [ytdlpCall, ffmpegCall] = spawnCalls;
 
     const fIdx = ytdlpCall.args.indexOf("-f");
     expect(fIdx).toBeGreaterThanOrEqual(0);
     const formatArg = ytdlpCall.args[fIdx + 1];
     expect(formatArg).toMatch(/^232\+/);
     expect(formatArg).toContain("136+");
+    expect(formatArg).not.toContain("/18/");
+    expect(formatArg).toContain("[height<=720]");
+    const movflagsIdx = ffmpegCall.args.indexOf("-movflags");
+    expect(movflagsIdx).toBeGreaterThanOrEqual(0);
+    expect(ffmpegCall.args[movflagsIdx + 1]).toContain("default_base_moof");
   });
 
   it("verifies additional resolutions (480p, 360p, 240p, 144p, 1440p, 4K) map to their HLS equivalents", () => {

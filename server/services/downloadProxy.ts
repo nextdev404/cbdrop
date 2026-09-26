@@ -538,7 +538,7 @@ function proxyManifestWithFfmpeg(payload: DownloadPayload, res: Response) {
     ...buildFfmpegHeaders(payload.headers, payload.url),
     "-i", payload.url,
     "-c", "copy",
-    "-movflags", "frag_keyframe+empty_moov",
+    "-movflags", "frag_keyframe+empty_moov+default_base_moof",
     "-f", "mp4",
     "pipe:1",
   ];
@@ -647,7 +647,7 @@ function mergeVideoAudioWithFfmpeg(payload: DownloadPayload, req: Request, res: 
     audioCodecArgs = isAacAudio
       ? ["-c:a", "copy"]
       : ["-c:a", "aac", "-b:a", "192k"];
-    muxerArgs = ["-movflags", "frag_keyframe+empty_moov", "-f", "mp4"];
+    muxerArgs = ["-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4"];
   }
 
   const args = [
@@ -804,29 +804,67 @@ export function streamYouTubeWithYtDlp(
 
   // Map DASH format IDs to HLS equivalents which are authorized and do not trigger 403
   const HLS_MAP: Record<string, string> = {
-    "137": "270", // 1080p
-    "136": "232", // 720p
-    "135": "231", // 480p
-    "134": "230", // 360p
-    "133": "229", // 240p
-    "160": "269", // 144p
-    "400": "620", // 1440p (2K)
-    "271": "620", // 1440p (2K)
-    "401": "625", // 2160p (4K)
-    "313": "625", // 2160p (4K)
-    "620": "620", // 1440p (2K)
-    "625": "625", // 2160p (4K)
-    "270": "270", // 1080p
-    "232": "232", // 720p
-    "231": "231", // 480p
-    "230": "230", // 360p
-    "229": "229", // 240p
-    "269": "269", // 144p
-    "248": "270", // 1080p
-    "247": "232", // 720p
-    "244": "231", // 480p
-    "243": "230", // 360p
-    "242": "229", // 240p
+    // 1080p
+    "137": "270",
+    "299": "312",
+    "312": "312",
+    "270": "270",
+    "248": "270",
+    "303": "312",
+    "617": "617",
+    "614": "614",
+    // 720p
+    "136": "232",
+    "298": "311",
+    "311": "311",
+    "232": "232",
+    "247": "232",
+    "302": "311",
+    "612": "612",
+    "609": "609",
+    // 480p
+    "135": "231",
+    "244": "231",
+    "231": "231",
+    "606": "606",
+    // 360p
+    "134": "230",
+    "243": "230",
+    "230": "230",
+    "605": "605",
+    // 240p
+    "133": "229",
+    "242": "229",
+    "229": "229",
+    "604": "604",
+    // 144p
+    "160": "269",
+    "278": "269",
+    "269": "269",
+    "603": "603",
+    // 1440p (2K)
+    "400": "620",
+    "271": "620",
+    "308": "623",
+    "623": "623",
+    "620": "620",
+    // 2160p (4K)
+    "401": "625",
+    "313": "625",
+    "315": "628",
+    "628": "628",
+    "625": "625",
+  };
+
+  const FORMAT_HEIGHT_MAP: Record<string, number> = {
+    "401": 2160, "315": 2160, "313": 2160, "625": 2160, "628": 2160,
+    "400": 1440, "308": 1440, "271": 1440, "620": 1440, "623": 1440,
+    "137": 1080, "299": 1080, "312": 1080, "270": 1080, "248": 1080, "303": 1080, "617": 1080, "614": 1080,
+    "136": 720,  "298": 720,  "311": 720,  "232": 720,  "247": 720,  "302": 720,  "612": 720,  "609": 720,
+    "135": 480,  "244": 480,  "231": 480,  "606": 480,
+    "134": 360,  "243": 360,  "230": 360,  "605": 360,
+    "133": 240,  "242": 240,  "229": 240,  "604": 240,
+    "160": 144,  "278": 144,  "269": 144,  "603": 144,
   };
 
   // YouTube HLS AAC audio streams (itag 234 / 233, including language suffixed like 234-13)
@@ -836,6 +874,10 @@ export function streamYouTubeWithYtDlp(
   const isYouTube = sourceUrl.includes("youtube.com") || sourceUrl.includes("youtu.be");
   let formatArg: string;
   if (isYouTube) {
+    const targetHeight =
+      (videoFormatId ? FORMAT_HEIGHT_MAP[videoFormatId] : undefined) ||
+      (formatId?.match(/(\d+)p?/)?.[1] ? parseInt(formatId.match(/(\d+)p?/)![1], 10) : undefined);
+
     if (isAudio) {
       if (container === "weba" || container === "opus") {
         formatArg = rawFormatId
@@ -843,22 +885,47 @@ export function streamYouTubeWithYtDlp(
           : "251/250/249/ba[ext=webm]/ba/bestaudio/best";
       } else {
         formatArg = rawFormatId
-          ? `${rawFormatId}/${HLS_AUDIO}/ba/bestaudio/best`
-          : `${HLS_AUDIO}/ba/bestaudio/best`;
+          ? `${rawFormatId}/${HLS_AUDIO}/140/ba/bestaudio/best`
+          : `${HLS_AUDIO}/140/ba/bestaudio/best`;
       }
     } else if (container === "webm") {
       const hlsId = videoFormatId ? HLS_MAP[videoFormatId] : undefined;
-      const primaryVideo = hlsId || videoFormatId || "625";
-      formatArg = `${primaryVideo}+251/${primaryVideo}+${HLS_AUDIO}/${videoFormatId}+251/${videoFormatId}+${HLS_AUDIO}/bestvideo[ext=webm]+bestaudio[ext=webm]/bestvideo[vcodec^=vp9]+bestaudio/bv*+ba/b/best`;
+      const primaryVideo = hlsId || videoFormatId || "628";
+      const heightFilter = targetHeight ? `[height<=${targetHeight}]` : "";
+      const candidates: string[] = [];
+      if (primaryVideo) {
+        candidates.push(`${primaryVideo}+251`, `${primaryVideo}+${HLS_AUDIO}`);
+      }
+      if (videoFormatId && videoFormatId !== primaryVideo) {
+        candidates.push(`${videoFormatId}+251`, `${videoFormatId}+${HLS_AUDIO}`);
+      }
+      candidates.push(
+        `bestvideo${heightFilter}[ext=webm]+bestaudio[ext=webm]`,
+        `bestvideo${heightFilter}[vcodec^=vp9]+bestaudio`,
+        `bestvideo${heightFilter}+bestaudio`,
+        `bv*${heightFilter}+ba`,
+        "bv*+ba/b/best"
+      );
+      formatArg = candidates.join("/");
     } else if (videoFormatId) {
       const hlsId = HLS_MAP[videoFormatId];
+      const heightFilter = targetHeight ? `[height<=${targetHeight}]` : "";
+      const candidates: string[] = [];
       if (hlsId && hlsId !== videoFormatId) {
-        formatArg = `${hlsId}+${HLS_AUDIO}/${videoFormatId}+${HLS_AUDIO}/18/bv*+ba/b/best`;
-      } else {
-        formatArg = `${videoFormatId}+${HLS_AUDIO}/18/bv*+ba/b/best`;
+        candidates.push(`${hlsId}+${HLS_AUDIO}`, `${hlsId}+140`);
       }
+      candidates.push(`${videoFormatId}+${HLS_AUDIO}`, `${videoFormatId}+140`);
+      candidates.push(
+        `bestvideo${heightFilter}[vcodec^=avc1]+bestaudio[ext=m4a]`,
+        `bestvideo${heightFilter}[ext=mp4]+bestaudio[ext=m4a]`,
+        `bestvideo${heightFilter}+bestaudio[ext=m4a]`,
+        `bestvideo${heightFilter}+bestaudio`,
+        `bv*${heightFilter}+ba`,
+        "bv*+ba/b/best"
+      );
+      formatArg = candidates.join("/");
     } else {
-      formatArg = `270+${HLS_AUDIO}/232+${HLS_AUDIO}/18/bv*+ba/b/best`;
+      formatArg = `270+${HLS_AUDIO}/232+${HLS_AUDIO}/bv*[height<=1080]+ba/bv*+ba/b/best`;
     }
   } else {
     // Non-YouTube platforms (TikTok, Instagram, Twitter/X, Facebook, Snapchat, etc.)
@@ -925,7 +992,7 @@ export function streamYouTubeWithYtDlp(
       "-vn",
       "-c:a", "aac",
       "-b:a", "192k",
-      "-movflags", "frag_keyframe+empty_moov",
+      "-movflags", "frag_keyframe+empty_moov+default_base_moof",
       "-f", "mp4",
       "pipe:1",
     ];
@@ -978,7 +1045,7 @@ export function streamYouTubeWithYtDlp(
       "-c:v", "copy",
       "-c:a", "aac",
       "-b:a", "192k",
-      "-movflags", "frag_keyframe+empty_moov",
+      "-movflags", "frag_keyframe+empty_moov+default_base_moof",
       "-f", "mp4",
       "pipe:1",
     ];

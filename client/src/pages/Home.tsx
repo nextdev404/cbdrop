@@ -136,6 +136,7 @@ type Format = {
   type: "video" | "audio" | "image";
   available: boolean;
   size: string;
+  filesize?: number;
   note: string;
   downloadUrl?: string;
   videoCodec?: string;
@@ -160,7 +161,7 @@ type JobResult = {
   filename: string;
   downloadUrl?: string;
   expiresAt?: string;
-  format?: Format;
+  format?: Format | any;
   success?: boolean;
   container?: string;
   videoCodec?: string;

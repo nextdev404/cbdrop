@@ -384,10 +384,10 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
       if (heightDiff !== 0) return heightDiff;
       const getCodecScore = (f: ExtractedFormat) => {
         const v = (f.vcodec || "").toLowerCase();
-        const ext = (f.ext || "").toLowerCase();
-        if (ext === "mp4" || v.startsWith("avc") || v.startsWith("h264")) return 3;
+        if (v.startsWith("avc") || v.startsWith("h264")) return 3;
         if (v.startsWith("vp9") || v.startsWith("vp09")) return 2;
         if (v.startsWith("av01") || v.startsWith("av1")) return 1;
+        if ((f.ext || "").toLowerCase() === "mp4") return 1.5;
         return 0;
       };
       const scoreDiff = getCodecScore(b) - getCodecScore(a);
@@ -397,7 +397,13 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
 
     for (const f of sorted) {
       const h = f.height || 0;
-      const container = (f.ext || "mp4").toLowerCase();
+      const v = (f.vcodec || "").toLowerCase();
+      let container = (f.ext || "mp4").toLowerCase();
+      if (v.startsWith("vp9") || v.startsWith("vp09") || v.startsWith("vp8")) {
+        container = "webm";
+      } else if (v.startsWith("avc") || v.startsWith("h264") || v.startsWith("hev") || v.startsWith("hvc")) {
+        container = "mp4";
+      }
       const formatKey = `${container}-${h}`;
       if (h > 0 && seenVideoFormats.has(formatKey)) continue;
       if (h > 0) seenVideoFormats.add(formatKey);
