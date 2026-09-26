@@ -799,6 +799,7 @@ export function streamYouTubeWithYtDlp(
   const cookiesPath = getCookiesPath();
 
   const rawFormatId = formatId ? formatId.replace(/^extractor-/, "").replace(/-direct$/, "").replace(/-mp4$/, "") : undefined;
+  const videoFormatId = rawFormatId ? (rawFormatId.includes("-") ? rawFormatId.split("-")[0] : rawFormatId) : undefined;
   const isAudio = container === "m4a" || container === "mp3" || container === "weba" || container === "opus" || container === "wav" || container === "flac" || (rawFormatId?.includes("audio") ?? false);
 
   // Map DASH format IDs to HLS equivalents which are authorized and do not trigger 403
@@ -846,15 +847,15 @@ export function streamYouTubeWithYtDlp(
           : `${HLS_AUDIO}/ba/bestaudio/best`;
       }
     } else if (container === "webm") {
-      formatArg = rawFormatId
-        ? `${rawFormatId}+251/${rawFormatId}+250/${rawFormatId}+ba[ext=webm]/bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/bv*+ba/best`
+      formatArg = videoFormatId
+        ? `${videoFormatId}+251/${videoFormatId}+250/${videoFormatId}+ba[ext=webm]/bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/bv*+ba/best`
         : `bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/bv*+ba/best`;
-    } else if (rawFormatId) {
-      const hlsId = HLS_MAP[rawFormatId];
-      if (hlsId && hlsId !== rawFormatId) {
-        formatArg = `${hlsId}+${HLS_AUDIO}/${rawFormatId}+${HLS_AUDIO}/18/bv*+ba/b/best`;
+    } else if (videoFormatId) {
+      const hlsId = HLS_MAP[videoFormatId];
+      if (hlsId && hlsId !== videoFormatId) {
+        formatArg = `${hlsId}+${HLS_AUDIO}/${videoFormatId}+${HLS_AUDIO}/18/bv*+ba/b/best`;
       } else {
-        formatArg = `${rawFormatId}+${HLS_AUDIO}/18/bv*+ba/b/best`;
+        formatArg = `${videoFormatId}+${HLS_AUDIO}/18/bv*+ba/b/best`;
       }
     } else {
       formatArg = `270+${HLS_AUDIO}/232+${HLS_AUDIO}/18/bv*+ba/b/best`;
@@ -1167,12 +1168,17 @@ export function registerDownloadProxy(app: Express) {
         return await proxyHttpMedia(payload, req, res, token);
       }
 
-      // True MP3 audio conversion via libmp3lame
+      // YouTube downloads (with sourceUrl) must ALWAYS stream via yt-dlp to avoid macOS TLS -9806 and cipher blocks
+      if (isYouTube && payload.sourceUrl) {
+        return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, payload.container, token, payload.expectedSize);
+      }
+
+      // True MP3 audio conversion via libmp3lame for other sources
       if (payload.container === "mp3" && payload.sourceUrl && !payload.url.includes(".mp3")) {
         return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, "mp3", token, payload.expectedSize);
       }
 
-      // Direct video + audio merge via ffmpeg (supports WebM VP9+Opus, MP4 H264+AAC)
+      // Direct video + audio merge via ffmpeg for non-YouTube platforms (supports WebM VP9+Opus, MP4 H264+AAC)
       if (payload.audioUrl) {
         return mergeVideoAudioWithFfmpeg(payload, req, res, token);
       }
