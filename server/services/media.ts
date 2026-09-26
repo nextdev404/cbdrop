@@ -436,8 +436,8 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
         isOriginal: true,
       });
 
-      // For 4K (2160p) and 2K (1440p) or webm, also offer direct resumable stream
-      if (h >= 1440 || container === "webm" || !matchedAudio) {
+      // If no audio stream was available to pair, provide the direct video-only stream
+      if (!matchedAudio) {
         formats.push({
           id: `extractor-${f.id}-direct`,
           container,

@@ -956,12 +956,12 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
         {/* Results Ad Banner Slot (Hidden for Pro subscribers) */}
         <AdBanner slot="results" className="mb-6" />
         {hasVideo ? (
-        <div className="mx-auto max-w-4xl rounded-[28px] border border-[#e5e6df] bg-white p-4 sm:p-5 md:p-6 shadow-[0_20px_50px_rgba(20,24,40,0.06)] transition-all dark:border-white/10 dark:bg-[#1a1c22]">
-          <div className="grid gap-4 sm:gap-5 md:grid-cols-[250px_1fr] lg:grid-cols-[280px_1fr] items-start">
+        <div className="mx-auto max-w-4xl rounded-[22px] sm:rounded-[28px] border border-[#e5e6df] bg-white p-3.5 sm:p-5 md:p-6 shadow-[0_20px_50px_rgba(20,24,40,0.06)] transition-all dark:border-white/10 dark:bg-[#1a1c22]">
+          <div className="grid gap-4 sm:gap-5 md:grid-cols-[240px_1fr] lg:grid-cols-[280px_1fr] items-start">
             
             {/* Left Column: Media Thumbnail & Creator Bar */}
             <div className="flex flex-col gap-2.5">
-              <div className="relative aspect-video w-full overflow-hidden rounded-[20px] bg-[#0d0f14] text-white shadow-md group">
+              <div className="relative aspect-video w-full overflow-hidden rounded-[18px] sm:rounded-[20px] bg-[#0d0f14] text-white shadow-md group">
                 {media.thumbnailUrl ? (
                   <>
                     <img
@@ -1028,7 +1028,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
             </div>
 
             {/* Right Column: Title, Metadata, Formats Grid */}
-            <div className="flex min-w-0 flex-col justify-between gap-3.5">
+            <div className="flex min-w-0 flex-col justify-between gap-3 sm:gap-3.5">
               <div>
                 {/* Status Badges */}
                 <div className="flex flex-wrap items-center gap-2">
@@ -1062,7 +1062,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   {/* Category Filter Pills */}
                   {availableCategories.length > 1 ? (
-                    <div className="inline-flex items-center gap-1 rounded-xl bg-[#f0f0ed] p-1 dark:bg-white/5">
+                    <div className="inline-flex flex-wrap items-center gap-1 rounded-xl bg-[#f0f0ed] p-1 dark:bg-white/5">
                       {availableCategories.map((cat) => {
                         const isActive = formatCategory === cat.id;
                         return (
@@ -1093,7 +1093,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                 </div>
 
                 {/* Formats Grid with Max-Height & Custom Scrollbar */}
-                <div className="grid gap-2 sm:grid-cols-2 max-h-[170px] sm:max-h-[190px] overflow-y-auto pr-1.5 custom-scrollbar">
+                <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 max-h-[220px] sm:max-h-[250px] md:max-h-[280px] overflow-y-auto pr-1 sm:pr-1.5 custom-scrollbar">
                   {filteredFormats.map((format) => {
                     const isSelected = selectedFormat === format.id;
                     const isImage = format.type === "image";
@@ -1146,16 +1146,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                               <span className="text-xs sm:text-[13px] font-black text-[#111318] dark:text-white">
                                 {format.container.toUpperCase()} · {format.quality}
                               </span>
-                              {format.videoCodec && (
-                                <span className="inline-flex items-center rounded px-1.5 py-0.2 text-[9px] font-semibold bg-[#ecece7] text-[#555] dark:bg-white/10 dark:text-[#d0d2ca]">
-                                  {format.videoCodec}
-                                </span>
-                              )}
-                              {format.audioCodec && (
-                                <span className="inline-flex items-center rounded px-1.5 py-0.2 text-[9px] font-semibold bg-[#ecece7] text-[#555] dark:bg-white/10 dark:text-[#d0d2ca]">
-                                  {format.audioCodec}
-                                </span>
-                              )}
                               {isProOnly && (
                                 <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-[#5e5ce6] to-[#8d8bff] px-1.5 py-0.2 text-[9px] font-black text-white shadow-xs">
                                   <Crown size={9} /> PRO
@@ -1204,10 +1194,8 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                   <>
                     <span className="rounded-lg bg-[#f0f0ed] px-2.5 py-0.5 text-xs font-black text-[#111318] dark:bg-white/10 dark:text-white">
                       {selected.container.toUpperCase()} · {selected.quality}
-                      {selected.videoCodec ? ` · ${selected.videoCodec}` : ""}
-                      {selected.audioCodec ? ` · ${selected.audioCodec}` : ""}
                     </span>
-                    <span className="rounded-lg bg-[#534ffd]/10 px-2.5 py-0.5 text-xs font-black text-[#534ffd] dark:bg-white/10 dark:text-[#d2f54a]">
+                    <span className="rounded-lg bg-[#534ffd]/10 px-2.5 py-0.5 text-xs font-black text-[#534ffd] dark:bg-white/10 dark:text-white">
                       File size: {selected.size}
                     </span>
                   </>
@@ -1259,10 +1247,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                 <div>
                   <p className="text-xs sm:text-sm font-black">Your {selected?.type === "image" ? "image" : "video"} is ready to download.</p>
                   <p className="mt-0.5 text-[11px] sm:text-xs font-semibold opacity-90">
-                    Format: <span className="font-bold">{selected?.container.toUpperCase()} ({selected?.quality})</span>
-                    {selected?.videoCodec && <span> · Video: <span className="font-bold">{selected.videoCodec}</span></span>}
-                    {selected?.audioCodec && <span> · Audio: <span className="font-bold">{selected.audioCodec}</span></span>}
-                     · File size: <span className="font-bold">{selected?.size}</span>
+                    Format: <span className="font-bold">{selected?.container.toUpperCase()} ({selected?.quality})</span> · File size: <span className="font-bold">{selected?.size}</span>
                   </p>
                 </div>
               </div>
