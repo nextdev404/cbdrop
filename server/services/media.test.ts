@@ -1056,4 +1056,88 @@ describe("media service platform detection", () => {
       expect(media.formats.some((f) => f.type === "image")).toBe(true);
     });
   });
+
+  describe("original video format and codec preservation", () => {
+    it("preserves WebM container, VP9 codec, and pairs with Opus audio for WebM streams", async () => {
+      const { extractedToMedia, cacheMedia, prepareDownload } = await import("./media");
+      const mockWebmMedia: import("../extractors/types").ExtractedMedia = {
+        id: "webm123",
+        title: "WebM 4K Sample Video",
+        uploader: "WebM Creator",
+        duration: 120,
+        platform: "YouTube",
+        formats: [
+          { id: "313", ext: "webm", height: 2160, width: 3840, vcodec: "vp9", acodec: "none", tbr: 18000, url: "https://example.com/v4k.webm" },
+          { id: "271", ext: "webm", height: 1440, width: 2560, vcodec: "vp09.00.41", acodec: "none", tbr: 9000, url: "https://example.com/v2k.webm" },
+          { id: "251", ext: "webm", vcodec: "none", acodec: "opus", tbr: 160, url: "https://example.com/audio.webm" },
+          { id: "140", ext: "m4a", vcodec: "none", acodec: "mp4a.40.2", tbr: 128, url: "https://example.com/audio.m4a" },
+        ],
+      };
+
+      const media = extractedToMedia("https://www.youtube.com/watch?v=webm123", mockWebmMedia);
+      const webm4k = media.formats.find((f) => f.id === "extractor-313");
+      expect(webm4k).toBeDefined();
+      expect(webm4k?.container).toBe("webm");
+      expect(webm4k?.quality).toBe("2160p");
+      expect(webm4k?.videoCodec).toBe("VP9");
+      expect(webm4k?.audioCodec).toBe("Opus");
+      expect(webm4k?.audioUrl).toBe("https://example.com/audio.webm");
+      expect(webm4k?.isOriginal).toBe(true);
+
+      // Verify prepareDownload preserves WebM metadata and extension
+      cacheMedia(media);
+      const job = await prepareDownload("https://www.youtube.com/watch?v=webm123", media.id, webm4k!.id);
+      expect(job.success).toBe(true);
+      expect(job.container).toBe("webm");
+      expect(job.videoCodec).toBe("VP9");
+      expect(job.audioCodec).toBe("Opus");
+      expect(job.filename).toMatch(/\.webm$/);
+      expect(job.fileName).toBe(job.filename);
+    });
+
+    it("preserves MP4 container, H.264 codec, and pairs with AAC audio for MP4 streams", async () => {
+      const { extractedToMedia, cacheMedia, prepareDownload } = await import("./media");
+      const mockMp4Media: import("../extractors/types").ExtractedMedia = {
+        id: "mp4123",
+        title: "MP4 1080p Video",
+        uploader: "MP4 Creator",
+        duration: 90,
+        platform: "YouTube",
+        formats: [
+          { id: "137", ext: "mp4", height: 1080, width: 1920, vcodec: "avc1.640028", acodec: "none", tbr: 4500, url: "https://example.com/v1080.mp4" },
+          { id: "140", ext: "m4a", vcodec: "none", acodec: "mp4a.40.2", tbr: 128, url: "https://example.com/audio.m4a" },
+        ],
+      };
+
+      const media = extractedToMedia("https://www.youtube.com/watch?v=mp4123", mockMp4Media);
+      const mp4Format = media.formats.find((f) => f.id === "extractor-137");
+      expect(mp4Format).toBeDefined();
+      expect(mp4Format?.container).toBe("mp4");
+      expect(mp4Format?.videoCodec).toBe("H.264");
+      expect(mp4Format?.audioCodec).toBe("AAC");
+      expect(mp4Format?.audioUrl).toBe("https://example.com/audio.m4a");
+
+      cacheMedia(media);
+      const job = await prepareDownload("https://www.youtube.com/watch?v=mp4123", media.id, mp4Format!.id);
+      expect(job.success).toBe(true);
+      expect(job.container).toBe("mp4");
+      expect(job.videoCodec).toBe("H.264");
+      expect(job.audioCodec).toBe("AAC");
+      expect(job.filename).toMatch(/\.mp4$/);
+    });
+
+    it("preserves direct MOV video URLs without converting or renaming to MP4", async () => {
+      const { resolveMedia, prepareDownload } = await import("./media");
+      const movUrl = "https://example.com/assets/sample-video.mov";
+      const media = await resolveMedia(movUrl);
+      expect(media.platform).toBe("Direct video");
+      expect(media.formats[0].container).toBe("mov");
+      expect(media.formats[0].isOriginal).toBe(true);
+
+      const job = await prepareDownload(movUrl, media.id, media.formats[0].id);
+      expect(job.success).toBe(true);
+      expect(job.container).toBe("mov");
+      expect(job.filename).toMatch(/\.mov$/);
+    });
+  });
 });

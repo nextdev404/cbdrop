@@ -20,6 +20,9 @@ export type MediaFormat = {
   /** Secondary audio-only URL to merge with video using ffmpeg */
   audioUrl?: string;
   audioHeaders?: Record<string, string>;
+  videoCodec?: string;
+  audioCodec?: string;
+  isOriginal?: boolean;
 };
 
 export type MediaAnalysis = {
@@ -40,6 +43,12 @@ export type DownloadJob = {
   filename: string;
   downloadUrl?: string;
   expiresAt?: string;
+  success?: boolean;
+  format?: string | MediaFormat;
+  container?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  fileName?: string;
 };
 
 type CloudflareVideo = {
@@ -153,6 +162,28 @@ export function detectPlatform(sourceUrl: string) {
   } catch { return null; }
 }
 
+export function normalizeVideoCodec(codec?: string): string | undefined {
+  if (!codec || codec === "none") return undefined;
+  const c = codec.toLowerCase();
+  if (c.startsWith("avc") || c.startsWith("h264")) return "H.264";
+  if (c.startsWith("hev") || c.startsWith("h265")) return "H.265 (HEVC)";
+  if (c.startsWith("vp09") || c.startsWith("vp9")) return "VP9";
+  if (c.startsWith("vp08") || c.startsWith("vp8")) return "VP8";
+  if (c.startsWith("av01") || c.startsWith("av1")) return "AV1";
+  return codec;
+}
+
+export function normalizeAudioCodec(codec?: string): string | undefined {
+  if (!codec || codec === "none") return undefined;
+  const c = codec.toLowerCase();
+  if (c.startsWith("mp4a") || c === "aac") return "AAC";
+  if (c.includes("opus")) return "Opus";
+  if (c.includes("mp3")) return "MP3";
+  if (c.includes("vorbis")) return "Vorbis";
+  if (c.includes("flac")) return "FLAC";
+  return codec;
+}
+
 function formatDuration(seconds?: number) {
   if (!seconds || seconds < 0) return "—";
   const minutes = Math.floor(seconds / 60);
@@ -171,7 +202,26 @@ function directMedia(sourceUrl: string): MediaAnalysis {
   const container = extension === "m4v" ? "mp4" : extension;
   const title = decodeURIComponent(parsed.pathname.split("/").pop() || "authorized-video").replace(/\.[a-z0-9]+$/i, "") || "Authorized video";
   const id = `direct_${createHash("sha256").update(sourceUrl).digest("hex").slice(0, 24)}`;
-  return { id, platform: "Direct video", title, creator: "Authorized source", duration: "—", source: "approved-provider", ready: true, formats: [{ id: "direct-video", container, quality: "source", type: "video", available: true, size: "Direct file", note: "Original authorized file", downloadUrl: sourceUrl }] };
+  return {
+    id,
+    platform: "Direct video",
+    title,
+    creator: "Authorized source",
+    duration: "—",
+    source: "approved-provider",
+    ready: true,
+    formats: [{
+      id: "direct-video",
+      container,
+      quality: "source",
+      type: "video",
+      available: true,
+      size: "Direct file",
+      note: "Original authorized file",
+      downloadUrl: sourceUrl,
+      isOriginal: true,
+    }],
+  };
 }
 
 function formatBytes(bytes?: number) {
@@ -191,7 +241,27 @@ function directImageMedia(sourceUrl: string): MediaAnalysis {
   const container = extension === "jpeg" ? "jpg" : extension;
   const title = decodeURIComponent(parsed.pathname.split("/").pop() || "image").replace(/\.[a-z0-9]+$/i, "") || "Image";
   const id = `direct_${createHash("sha256").update(sourceUrl).digest("hex").slice(0, 24)}`;
-  return { id, platform: "Direct image", title, creator: "Authorized source", duration: "—", source: "approved-provider", ready: true, thumbnailUrl: sourceUrl, formats: [{ id: "direct-image", container, quality: "original", type: "image", available: true, size: "Direct file", note: "Original image file", downloadUrl: sourceUrl }] };
+  return {
+    id,
+    platform: "Direct image",
+    title,
+    creator: "Authorized source",
+    duration: "—",
+    source: "approved-provider",
+    ready: true,
+    thumbnailUrl: sourceUrl,
+    formats: [{
+      id: "direct-image",
+      container,
+      quality: "original",
+      type: "image",
+      available: true,
+      size: "Direct file",
+      note: "Original image file",
+      downloadUrl: sourceUrl,
+      isOriginal: true,
+    }],
+  };
 }
 
 function resolveFormatHeaders(url?: string, existing?: Record<string, string>, platform?: string): Record<string, string> | undefined {
@@ -279,20 +349,33 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
     return isManifest && !isAudioStream(f) && (!f.vcodec || f.vcodec !== "none");
   });
 
-  // Best audio stream to pair with video (prefer original non-dubbed m4a/aac for widest compatibility)
-  const bestAudio = [...audioOnly].sort((a, b) => {
-    // Deprioritize dubbed/translated audio (formatNote often has language names)
-    const aIsDubbed = /dubbed|auto-translated|\b(de|fr|es|it|pt|ru|ko|ja|zh|ar)\b/i.test(a.formatNote || "") ? -1 : 0;
-    const bIsDubbed = /dubbed|auto-translated|\b(de|fr|es|it|pt|ru|ko|ja|zh|ar)\b/i.test(b.formatNote || "") ? -1 : 0;
-    if (aIsDubbed !== bIsDubbed) return bIsDubbed - aIsDubbed;
-    // Prefer m4a/aac
-    const aIsAac = (a.acodec || "").includes("mp4a") || a.ext === "m4a" ? 1 : 0;
-    const bIsAac = (b.acodec || "").includes("mp4a") || b.ext === "m4a" ? 1 : 0;
-    return bIsAac - aIsAac || (b.tbr || 0) - (a.tbr || 0);
-  })[0];
+  // Best audio stream to pair with video (matches codec/container for lossless remuxing)
+  const getBestAudioForVideo = (videoExt: string, videoCodec?: string) => {
+    const isWebm = (videoExt || "").toLowerCase() === "webm" || (videoCodec || "").toLowerCase().includes("vp");
+    const sorted = [...audioOnly].sort((a, b) => {
+      // Deprioritize dubbed/translated audio (formatNote often has language names)
+      const aIsDubbed = /dubbed|auto-translated|\b(de|fr|es|it|pt|ru|ko|ja|zh|ar)\b/i.test(a.formatNote || "") ? -1 : 0;
+      const bIsDubbed = /dubbed|auto-translated|\b(de|fr|es|it|pt|ru|ko|ja|zh|ar)\b/i.test(b.formatNote || "") ? -1 : 0;
+      if (aIsDubbed !== bIsDubbed) return bIsDubbed - aIsDubbed;
+
+      if (isWebm) {
+        // Prefer Opus / WebM audio for WebM video (enables 100% lossless remuxing)
+        const aIsOpus = (a.acodec || "").toLowerCase().includes("opus") || a.ext === "webm" || a.ext === "weba" ? 1 : 0;
+        const bIsOpus = (b.acodec || "").toLowerCase().includes("opus") || b.ext === "webm" || b.ext === "weba" ? 1 : 0;
+        if (aIsOpus !== bIsOpus) return bIsOpus - aIsOpus;
+      } else {
+        // Prefer AAC / M4A audio for MP4 video (enables 100% lossless remuxing)
+        const aIsAac = (a.acodec || "").toLowerCase().includes("mp4a") || a.ext === "m4a" || a.ext === "aac" ? 1 : 0;
+        const bIsAac = (b.acodec || "").toLowerCase().includes("mp4a") || b.ext === "m4a" || b.ext === "aac" ? 1 : 0;
+        if (aIsAac !== bIsAac) return bIsAac - aIsAac;
+      }
+      return (b.tbr || 0) - (a.tbr || 0);
+    });
+    return sorted[0];
+  };
 
   const formats: MediaFormat[] = [];
-  const seenVideoHeights = new Set<number>();
+  const seenVideoFormats = new Set<string>();
 
   // 1. Adaptive video streams (Full HD 1080p, HD 720p, 4K, 2K, 480p, etc.)
   if (videoOnly.length > 0) {
@@ -314,13 +397,19 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
 
     for (const f of sorted) {
       const h = f.height || 0;
-      if (h > 0 && seenVideoHeights.has(h)) continue;
-      if (h > 0) seenVideoHeights.add(h);
+      const container = (f.ext || "mp4").toLowerCase();
+      const formatKey = `${container}-${h}`;
+      if (h > 0 && seenVideoFormats.has(formatKey)) continue;
+      if (h > 0) seenVideoFormats.add(formatKey);
+
+      const matchedAudio = getBestAudioForVideo(container, f.vcodec);
+      const vCodecNorm = normalizeVideoCodec(f.vcodec);
+      const aCodecNorm = matchedAudio ? normalizeAudioCodec(matchedAudio.acodec) : undefined;
 
       const videoBits = f.tbr && extracted.duration ? Math.round((f.tbr * 1000 / 8) * extracted.duration) : undefined;
-      const audioBits = bestAudio ? (bestAudio.filesize || (bestAudio.tbr && extracted.duration ? Math.round((bestAudio.tbr * 1000 / 8) * extracted.duration) : undefined)) : undefined;
+      const audioBits = matchedAudio ? (matchedAudio.filesize || (matchedAudio.tbr && extracted.duration ? Math.round((matchedAudio.tbr * 1000 / 8) * extracted.duration) : undefined)) : undefined;
       const totalBytes = videoBits && audioBits ? videoBits + audioBits : f.filesize || videoBits;
-      const container = f.ext || "mp4";
+
       let noteLabel = "HD video";
       if (h >= 2160) noteLabel = "4K Ultra HD";
       else if (h >= 1440) noteLabel = "2K Quad HD";
@@ -328,8 +417,27 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
       else if (h >= 720) noteLabel = "HD video";
       else if (h > 0) noteLabel = `${h}p video`;
 
+      // Main merged format with matching audio stream
+      formats.push({
+        id: `extractor-${f.id}`,
+        container,
+        quality: h ? `${h}p` : "source",
+        type: "video",
+        available: true,
+        size: formatBytes(totalBytes),
+        filesize: totalBytes,
+        note: matchedAudio ? `${noteLabel} · original` : `${noteLabel} · direct`,
+        downloadUrl: f.url,
+        httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, platform),
+        audioUrl: matchedAudio?.url,
+        audioHeaders: resolveFormatHeaders(matchedAudio?.url, matchedAudio?.httpHeaders, platform),
+        videoCodec: vCodecNorm,
+        audioCodec: aCodecNorm,
+        isOriginal: true,
+      });
+
       // For 4K (2160p) and 2K (1440p) or webm, also offer direct resumable stream
-      if (h >= 1440 || container === "webm" || !bestAudio) {
+      if (h >= 1440 || container === "webm" || !matchedAudio) {
         formats.push({
           id: `extractor-${f.id}-direct`,
           container,
@@ -341,41 +449,11 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
           note: `${noteLabel} · direct (resumable)`,
           downloadUrl: f.url,
           httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, platform),
+          videoCodec: vCodecNorm,
+          isOriginal: true,
         });
       }
 
-      // If format is WebM, also provide MP4 option for maximum device compatibility
-      if (h >= 1440 && container === "webm") {
-        formats.push({
-          id: `extractor-${f.id}-mp4`,
-          container: "mp4",
-          quality: h ? `${h}p` : "source",
-          type: "video",
-          available: true,
-          size: formatBytes(totalBytes),
-          filesize: totalBytes,
-          note: `${noteLabel} · MP4`,
-          downloadUrl: f.url,
-          httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, platform),
-          audioUrl: bestAudio?.url,
-          audioHeaders: resolveFormatHeaders(bestAudio?.url, bestAudio?.httpHeaders, platform),
-        });
-      }
-
-      formats.push({
-        id: `extractor-${f.id}`,
-        container,
-        quality: h ? `${h}p` : "source",
-        type: "video",
-        available: true,
-        size: formatBytes(totalBytes),
-        filesize: totalBytes,
-        note: bestAudio ? `${noteLabel} · merged` : `${noteLabel} · direct`,
-        downloadUrl: f.url,
-        httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, platform),
-        audioUrl: bestAudio?.url,
-        audioHeaders: resolveFormatHeaders(bestAudio?.url, bestAudio?.httpHeaders, platform),
-      });
       if (formats.filter(f => f.type === "video").length >= 8) break;
     }
   }
@@ -385,13 +463,15 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
     const sorted = [...progressive].sort((a, b) => (b.height || 0) - (a.height || 0) || (b.tbr || 0) - (a.tbr || 0));
     for (const f of sorted) {
       const h = f.height || 0;
-      if (h > 0 && seenVideoHeights.has(h) && formats.filter(f => f.type === "video").length >= 4) continue;
-      if (h > 0) seenVideoHeights.add(h);
+      const container = (f.ext || "mp4").toLowerCase();
+      const formatKey = `prog-${container}-${h}`;
+      if (h > 0 && seenVideoFormats.has(formatKey) && formats.filter(f => f.type === "video").length >= 4) continue;
+      if (h > 0) seenVideoFormats.add(formatKey);
 
       const bytes = f.filesize || (f.tbr && extracted.duration ? Math.round((f.tbr * 1000 / 8) * extracted.duration) : undefined);
       formats.push({
         id: `extractor-${f.id}`,
-        container: f.ext || "mp4",
+        container,
         quality: f.height ? `${f.height}p` : "source",
         type: "video",
         available: true,
@@ -400,6 +480,9 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
         note: `${f.formatNote || "Video"} · direct`,
         downloadUrl: f.url,
         httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, extracted.platform),
+        videoCodec: normalizeVideoCodec(f.vcodec),
+        audioCodec: normalizeAudioCodec(f.acodec),
+        isOriginal: true,
       });
       if (formats.filter(f => f.type === "video").length >= 10) break;
     }
@@ -424,6 +507,9 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
         note: `${f.formatNote || "Adaptive stream"} · stream`,
         downloadUrl: f.url,
         httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, platform),
+        videoCodec: normalizeVideoCodec(f.vcodec),
+        audioCodec: normalizeAudioCodec(f.acodec),
+        isOriginal: true,
       });
     }
   }
@@ -437,7 +523,7 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
         const bytes = f.filesize || (f.tbr && extracted.duration ? Math.round((f.tbr * 1000 / 8) * extracted.duration) : undefined);
         formats.push({
           id: `extractor-${f.id}`,
-          container: f.ext || "mp4",
+          container: (f.ext || "mp4").toLowerCase(),
           quality: f.height ? `${f.height}p` : "HD",
           type: "video",
           available: true,
@@ -446,6 +532,9 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
           note: `${f.formatNote || "Direct video"} · direct`,
           downloadUrl: f.url,
           httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, platform),
+          videoCodec: normalizeVideoCodec(f.vcodec),
+          audioCodec: normalizeAudioCodec(f.acodec),
+          isOriginal: true,
         });
       }
     }
@@ -465,6 +554,7 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
       const bytes = f.filesize || (f.tbr && extracted.duration ? Math.round((f.tbr * 1000 / 8) * extracted.duration) : undefined);
       const rawExt = (f.ext || "m4a").toLowerCase();
       const container = rawExt === "webm" ? "weba" : rawExt;
+      const aCodec = normalizeAudioCodec(f.acodec) || (container === "weba" ? "Opus" : "AAC");
       formats.push({
         id: `extractor-${f.id}`,
         container,
@@ -476,6 +566,8 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
         note: `${f.formatNote || "Audio track"} · direct`,
         downloadUrl: f.url,
         httpHeaders: f.httpHeaders,
+        audioCodec: aCodec,
+        isOriginal: true,
       });
     }
   }
@@ -841,7 +933,20 @@ export async function prepareDownload(sourceUrl: string, mediaId: string, format
     const ready = download?.status === "ready";
     const filename = `cbdrop-${uid.slice(0, 8)}.${format.container}`;
     const proxyUrl = ready && url ? createDownloadProxyUrl(url, filename, format.container) : undefined;
-    return { jobId: `cf_${uid}_${formatId}`, status: ready ? "completed" : "processing", filename, downloadUrl: proxyUrl, format: { ...format, ...(proxyUrl && { downloadUrl: proxyUrl }) }, media, expiresAt: undefined };
+    return {
+      jobId: `cf_${uid}_${formatId}`,
+      status: ready ? "completed" : "processing",
+      filename,
+      downloadUrl: proxyUrl,
+      format: { ...format, ...(proxyUrl && { downloadUrl: proxyUrl }) },
+      media,
+      expiresAt: undefined,
+      success: true,
+      container: format.container,
+      videoCodec: format.videoCodec,
+      audioCodec: format.audioCodec,
+      fileName: filename,
+    };
   }
   if (mediaId.startsWith("extractor_")) {
     const cached = analysisCache.get(mediaId)?.media;
@@ -879,7 +984,19 @@ export async function prepareDownload(sourceUrl: string, mediaId: string, format
       rawFormatId,
       format.filesize
     );
-    return { jobId: `job_${nanoid(10)}`, status: "completed", filename, downloadUrl: proxyUrl, format, media };
+    return {
+      jobId: `job_${nanoid(10)}`,
+      status: "completed",
+      filename,
+      downloadUrl: proxyUrl,
+      format,
+      media,
+      success: true,
+      container: effectiveContainer,
+      videoCodec: format.videoCodec,
+      audioCodec: format.audioCodec,
+      fileName: filename,
+    };
   }
   if (mediaId.startsWith("direct_")) {
     const media = isDirectImageUrl(sourceUrl) ? directImageMedia(sourceUrl) : directMedia(sourceUrl);
@@ -898,12 +1015,36 @@ export async function prepareDownload(sourceUrl: string, mediaId: string, format
       undefined,
       format.filesize
     );
-    return { jobId: `job_${nanoid(10)}`, status: "completed", filename, downloadUrl: proxyUrl, format, media };
+    return {
+      jobId: `job_${nanoid(10)}`,
+      status: "completed",
+      filename,
+      downloadUrl: proxyUrl,
+      format,
+      media,
+      success: true,
+      container: format.container,
+      videoCodec: format.videoCodec,
+      audioCodec: format.audioCodec,
+      fileName: filename,
+    };
   }
   const media = await resolveMedia(sourceUrl);
   const format = media.formats.find((item) => item.id === formatId && item.available);
   if (!format) throw new Error("That format is no longer available. Please choose another format.");
-  return { jobId: `job_${nanoid(10)}`, status: "completed", filename: `cbdrop-${format.quality}.${format.container}.txt`, format, media };
+  const filename = `cbdrop-${format.quality}.${format.container}.txt`;
+  return {
+    jobId: `job_${nanoid(10)}`,
+    status: "completed",
+    filename,
+    format,
+    media,
+    success: true,
+    container: format.container,
+    videoCodec: format.videoCodec,
+    audioCodec: format.audioCodec,
+    fileName: filename,
+  };
 }
 
 export async function refreshDownload(jobId: string, formatId: string): Promise<DownloadJob> {

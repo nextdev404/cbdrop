@@ -141,7 +141,7 @@ const mediaRouter = router({
             title: job.filename || "Video Media",
             creator: null,
             quality: input.formatId,
-            container: "mp4",
+            container: (job.format && typeof job.format === "object" && "container" in job.format ? job.format.container : job.container) || "mp4",
             status: "completed",
             filename: job.filename,
           });

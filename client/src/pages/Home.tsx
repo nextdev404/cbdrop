@@ -138,6 +138,9 @@ type Format = {
   size: string;
   note: string;
   downloadUrl?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  isOriginal?: boolean;
 };
 
 type MediaResult = {
@@ -151,7 +154,19 @@ type MediaResult = {
   formats: Format[];
 };
 
-type JobResult = { jobId: string; status: "queued" | "processing" | "completed"; filename: string; downloadUrl?: string; expiresAt?: string; format?: Format };
+type JobResult = {
+  jobId: string;
+  status: "queued" | "processing" | "completed";
+  filename: string;
+  downloadUrl?: string;
+  expiresAt?: string;
+  format?: Format;
+  success?: boolean;
+  container?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  fileName?: string;
+};
 type UiStatus = "idle" | "analyzing" | "ready" | "processing" | "completed" | "failed";
 
 function BrandMark({ className = "size-9" }: { className?: string }) {
@@ -1131,6 +1146,16 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                               <span className="text-xs sm:text-[13px] font-black text-[#111318] dark:text-white">
                                 {format.container.toUpperCase()} · {format.quality}
                               </span>
+                              {format.videoCodec && (
+                                <span className="inline-flex items-center rounded px-1.5 py-0.2 text-[9px] font-semibold bg-[#ecece7] text-[#555] dark:bg-white/10 dark:text-[#d0d2ca]">
+                                  {format.videoCodec}
+                                </span>
+                              )}
+                              {format.audioCodec && (
+                                <span className="inline-flex items-center rounded px-1.5 py-0.2 text-[9px] font-semibold bg-[#ecece7] text-[#555] dark:bg-white/10 dark:text-[#d0d2ca]">
+                                  {format.audioCodec}
+                                </span>
+                              )}
                               {isProOnly && (
                                 <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-[#5e5ce6] to-[#8d8bff] px-1.5 py-0.2 text-[9px] font-black text-white shadow-xs">
                                   <Crown size={9} /> PRO
@@ -1179,6 +1204,8 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                   <>
                     <span className="rounded-lg bg-[#f0f0ed] px-2.5 py-0.5 text-xs font-black text-[#111318] dark:bg-white/10 dark:text-white">
                       {selected.container.toUpperCase()} · {selected.quality}
+                      {selected.videoCodec ? ` · ${selected.videoCodec}` : ""}
+                      {selected.audioCodec ? ` · ${selected.audioCodec}` : ""}
                     </span>
                     <span className="rounded-lg bg-[#534ffd]/10 px-2.5 py-0.5 text-xs font-black text-[#534ffd] dark:bg-white/10 dark:text-[#d2f54a]">
                       File size: {selected.size}
@@ -1216,7 +1243,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                   ) : (
                     <>
                       <ArrowDownToLine size={16} strokeWidth={2.5} className="transition-transform duration-200 group-hover:translate-y-0.5" />
-                      <span>Download {selected ? `${selected.quality} (${selected.size})` : "media"}</span>
+                      <span>Download {selected ? `${selected.container.toUpperCase()} ${selected.quality} (${selected.size})` : "media"}</span>
                     </>
                   )}
                 </button>
@@ -1232,7 +1259,10 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                 <div>
                   <p className="text-xs sm:text-sm font-black">Your {selected?.type === "image" ? "image" : "video"} is ready to download.</p>
                   <p className="mt-0.5 text-[11px] sm:text-xs font-semibold opacity-90">
-                    Format: <span className="font-bold">{selected?.container.toUpperCase()} ({selected?.quality})</span> · File size: <span className="font-bold">{selected?.size}</span>
+                    Format: <span className="font-bold">{selected?.container.toUpperCase()} ({selected?.quality})</span>
+                    {selected?.videoCodec && <span> · Video: <span className="font-bold">{selected.videoCodec}</span></span>}
+                    {selected?.audioCodec && <span> · Audio: <span className="font-bold">{selected.audioCodec}</span></span>}
+                     · File size: <span className="font-bold">{selected?.size}</span>
                   </p>
                 </div>
               </div>
