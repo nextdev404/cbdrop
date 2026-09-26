@@ -233,8 +233,16 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
     return f.vcodec === "none" || (!f.vcodec && !f.acodec);
   };
 
-  const extractedImageFormats = validFormats.filter(isImageFormat);
-  const mediaStreamFormats = validFormats.filter((f) => !isImageFormat(f));
+  const isStoryboard = (f: { ext?: string; id?: string; formatNote?: string }) => {
+    const ext = (f.ext || "").toLowerCase();
+    if (ext === "mhtml") return true;
+    if (f.id && /^sb\d+/i.test(f.id)) return true;
+    if (f.formatNote && /storyboard/i.test(f.formatNote)) return true;
+    return false;
+  };
+
+  const extractedImageFormats = validFormats.filter(f => isImageFormat(f) && !isStoryboard(f));
+  const mediaStreamFormats = validFormats.filter((f) => !isImageFormat(f) && !isStoryboard(f));
 
   const AUDIO_EXTS = new Set(["m4a", "mp3", "wav", "aac", "opus", "oga", "ogg", "flac", "weba", "m4b"]);
   const isAudioStream = (f: { ext?: string; vcodec?: string; acodec?: string; height?: number; width?: number }) => {
@@ -284,52 +292,31 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
   })[0];
 
   const formats: MediaFormat[] = [];
+  const seenVideoHeights = new Set<number>();
 
-  if (progressive.length > 0) {
-    // True progressive (audio+video in one file)
-    const sorted = [...progressive].sort((a, b) => (b.height || 0) - (a.height || 0) || (b.tbr || 0) - (a.tbr || 0)).slice(0, 6);
-    for (const f of sorted) {
-      const bytes = f.filesize || (f.tbr && extracted.duration ? Math.round((f.tbr * 1000 / 8) * extracted.duration) : undefined);
-      formats.push({
-        id: `extractor-${f.id}`,
-        container: f.ext || "mp4",
-        quality: f.height ? `${f.height}p` : "source",
-        type: "video",
-        available: true,
-        size: formatBytes(bytes),
-        filesize: bytes,
-        note: `${f.formatNote || "Video"} · direct`,
-        downloadUrl: f.url,
-        httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, extracted.platform),
-      });
-    }
-  } else if (videoOnly.length > 0) {
-    // Adaptive: pair each video-only with the best audio stream if available, or offer direct video
-    // Support all resolutions up to 4K (2160p) and 2K (1440p)
-    const sorted = [...videoOnly]
-      .sort((a, b) => {
-        const heightDiff = (b.height || 0) - (a.height || 0);
-        if (heightDiff !== 0) return heightDiff;
-        // Prefer MP4 / AVC1 (H.264), then VP9, then AV1 for best compatibility
-        const getCodecScore = (f: ExtractedFormat) => {
-          const v = (f.vcodec || "").toLowerCase();
-          const ext = (f.ext || "").toLowerCase();
-          if (ext === "mp4" || v.startsWith("avc") || v.startsWith("h264")) return 3;
-          if (v.startsWith("vp9") || v.startsWith("vp09")) return 2;
-          if (v.startsWith("av01") || v.startsWith("av1")) return 1;
-          return 0;
-        };
-        const scoreDiff = getCodecScore(b) - getCodecScore(a);
-        if (scoreDiff !== 0) return scoreDiff;
-        return (b.tbr || 0) - (a.tbr || 0);
-      });
+  // 1. Adaptive video streams (Full HD 1080p, HD 720p, 4K, 2K, 480p, etc.)
+  if (videoOnly.length > 0) {
+    const sorted = [...videoOnly].sort((a, b) => {
+      const heightDiff = (b.height || 0) - (a.height || 0);
+      if (heightDiff !== 0) return heightDiff;
+      const getCodecScore = (f: ExtractedFormat) => {
+        const v = (f.vcodec || "").toLowerCase();
+        const ext = (f.ext || "").toLowerCase();
+        if (ext === "mp4" || v.startsWith("avc") || v.startsWith("h264")) return 3;
+        if (v.startsWith("vp9") || v.startsWith("vp09")) return 2;
+        if (v.startsWith("av01") || v.startsWith("av1")) return 1;
+        return 0;
+      };
+      const scoreDiff = getCodecScore(b) - getCodecScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      return (b.tbr || 0) - (a.tbr || 0);
+    });
 
-    // Deduplicate by height, prefer highest compatibility codec
-    const seenHeights = new Set<number>();
     for (const f of sorted) {
       const h = f.height || 0;
-      if (seenHeights.has(h)) continue;
-      seenHeights.add(h);
+      if (h > 0 && seenVideoHeights.has(h)) continue;
+      if (h > 0) seenVideoHeights.add(h);
+
       const videoBits = f.tbr && extracted.duration ? Math.round((f.tbr * 1000 / 8) * extracted.duration) : undefined;
       const audioBits = bestAudio ? (bestAudio.filesize || (bestAudio.tbr && extracted.duration ? Math.round((bestAudio.tbr * 1000 / 8) * extracted.duration) : undefined)) : undefined;
       const totalBytes = videoBits && audioBits ? videoBits + audioBits : f.filesize || videoBits;
@@ -371,9 +358,37 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
         audioUrl: bestAudio?.url,
         audioHeaders: resolveFormatHeaders(bestAudio?.url, bestAudio?.httpHeaders, platform),
       });
-      if (formats.length >= 8) break;
+      if (formats.filter(f => f.type === "video").length >= 8) break;
     }
-  } else if (manifestVideo.length > 0) {
+  }
+
+  // 2. Progressive formats (e.g. 360p direct, or standalone video+audio files)
+  if (progressive.length > 0) {
+    const sorted = [...progressive].sort((a, b) => (b.height || 0) - (a.height || 0) || (b.tbr || 0) - (a.tbr || 0));
+    for (const f of sorted) {
+      const h = f.height || 0;
+      if (h > 0 && seenVideoHeights.has(h) && formats.filter(f => f.type === "video").length >= 4) continue;
+      if (h > 0) seenVideoHeights.add(h);
+
+      const bytes = f.filesize || (f.tbr && extracted.duration ? Math.round((f.tbr * 1000 / 8) * extracted.duration) : undefined);
+      formats.push({
+        id: `extractor-${f.id}`,
+        container: f.ext || "mp4",
+        quality: f.height ? `${f.height}p` : "source",
+        type: "video",
+        available: true,
+        size: formatBytes(bytes),
+        filesize: bytes,
+        note: `${f.formatNote || "Video"} · direct`,
+        downloadUrl: f.url,
+        httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, extracted.platform),
+      });
+      if (formats.filter(f => f.type === "video").length >= 10) break;
+    }
+  }
+
+  // 3. Fallback to HLS/DASH manifest streams if no direct streams found
+  if (formats.filter(f => f.type === "video").length === 0 && manifestVideo.length > 0) {
     // HLS/DASH fallback
     const sorted = [...manifestVideo].sort((a, b) => (b.height || 0) - (a.height || 0)).slice(0, 3);
     for (const f of sorted) {
@@ -760,11 +775,12 @@ export async function resolveMedia(sourceUrl: string): Promise<MediaAnalysis> {
   let extracted: ExtractedMedia | null = null;
   if (platform === "YouTube") {
     try {
-      extracted = await extractWithYtDlp(cleanUrl);
-    } catch (ytDlpError) {
-      console.warn("[resolveMedia] yt-dlp failed on YouTube, trying ytultra fallback:", ytDlpError);
       extracted = await extractYouTubeWithYtUltra(cleanUrl);
-      if (!extracted) throw ytDlpError;
+    } catch (ytUltraError) {
+      console.warn("[resolveMedia] ytultra failed on YouTube, trying yt-dlp fallback:", ytUltraError);
+    }
+    if (!extracted || !extracted.formats.length) {
+      extracted = await extractWithYtDlp(cleanUrl);
     }
   } else {
     extracted = await extractWithYtDlp(cleanUrl);
