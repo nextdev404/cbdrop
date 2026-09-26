@@ -375,8 +375,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
   const [isZipping, setIsZipping] = useState(false);
   const [visibleCount, setVisibleCount] = useState(4);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-  const [storyHtml, setStoryHtml] = useState("");
-  const [cookieInput, setCookieInput] = useState("");
 
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledMediaIdRef = useRef<string | null>(null);
@@ -681,36 +679,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     handleAnalyzeWithUrl(url);
   }
 
-  function handleExtractFromHtml(rawHtml: string) {
-    handleAnalyzeWithUrl(rawHtml);
-  }
-
-  async function handleSaveCookies() {
-    if (!cookieInput.trim()) return;
-    try {
-      await saveCookiesMutation.mutateAsync({ content: cookieInput.trim() });
-      toast.success("Facebook cookies saved successfully!");
-      setCookieInput("");
-      cookiesStatus.refetch();
-      if (url.trim()) {
-        handleAnalyzeWithUrl(url.trim());
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save cookies");
-    }
-  }
-
-  async function handleClearCookies() {
-    try {
-      await clearCookiesMutation.mutateAsync();
-      toast.info("Facebook cookies removed");
-      cookiesStatus.refetch();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to clear cookies");
-    }
-  }
-
-
   function handleDownload() {
     if (!media || !selected) return;
     setStatus("processing");
@@ -966,111 +934,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
               </div>
             </div>
           </div>
-
-          {isFacebookIssue && (
-            <div className="rounded-[28px] border border-[#dedfd8] bg-white p-6 shadow-md dark:border-white/10 dark:bg-[#1a1c22]">
-              <div className="flex items-center gap-2.5">
-                <span className="flex size-8 items-center justify-center rounded-xl bg-[#5e5ce6]/10 text-[#5e5ce6] dark:bg-[#d8ef54]/15 dark:text-[#d8ef54]">
-                  <Sparkles size={16} />
-                </span>
-                <div>
-                  <h3 className="text-base font-black tracking-[-0.02em] text-[#111318] dark:text-white">
-                    How to download this Facebook Story
-                  </h3>
-                  <p className="text-xs text-[#85878e] dark:text-[#a0a3af]">
-                    Meta redirects unauthenticated story requests to login. Use either method below to download immediately:
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                {/* Method 1: Instant Page Source */}
-                <div className="flex flex-col justify-between rounded-2xl border border-[#d8ef54] bg-[#fbfdea] p-4 dark:border-[#d8ef54]/30 dark:bg-[#222718]">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-black text-[#111318] dark:text-white">
-                        Method 1: Paste Page Source
-                      </span>
-                      <span className="rounded-full bg-[#d8ef54] px-2 py-0.5 text-[9px] font-black uppercase text-[#475708]">
-                        Instant · No Login
-                      </span>
-                    </div>
-                    <ol className="mt-2.5 space-y-1 text-xs text-[#52573d] dark:text-[#c4cbaf]">
-                      <li>1. Open the Facebook Story in your browser tab.</li>
-                      <li>2. Press <kbd className="rounded bg-black/10 px-1 py-0.5 font-mono text-[10px] dark:bg-white/10">Ctrl+U</kbd> (or <kbd className="rounded bg-black/10 px-1 py-0.5 font-mono text-[10px] dark:bg-white/10">Cmd+Opt+U</kbd> on Mac).</li>
-                      <li>3. Select all (<kbd className="rounded bg-black/10 px-1 py-0.5 font-mono text-[10px] dark:bg-white/10">Ctrl+A</kbd>), copy (<kbd className="rounded bg-black/10 px-1 py-0.5 font-mono text-[10px] dark:bg-white/10">Ctrl+C</kbd>), and paste:</li>
-                    </ol>
-                    <textarea
-                      rows={4}
-                      value={storyHtml}
-                      onChange={(e) => setStoryHtml(e.target.value)}
-                      placeholder="Paste copied Facebook page source HTML here..."
-                      className="mt-2.5 w-full rounded-xl border border-[#dedfd8] bg-white p-2.5 text-[11px] font-mono text-[#111318] outline-none placeholder:text-[#9b9da5] focus:border-[#5e5ce6] dark:border-white/10 dark:bg-[#111318] dark:text-white"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    disabled={!storyHtml.trim() || analyze.isPending}
-                    onClick={() => handleExtractFromHtml(storyHtml)}
-                    className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#5e5ce6] px-4 text-xs font-black text-white shadow-sm transition hover:bg-[#504ed1] active:scale-[0.98] disabled:opacity-50"
-                  >
-                    {analyze.isPending ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                    <span>Extract & Download Story</span>
-                  </button>
-                </div>
-
-                {/* Method 2: Save Facebook Session Cookies */}
-                <div className="flex flex-col justify-between rounded-2xl border border-[#dedfd8] bg-[#fbfbf8] p-4 dark:border-white/10 dark:bg-white/5">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-black text-[#111318] dark:text-white">
-                        Method 2: Save Session Cookies
-                      </span>
-                      {cookiesStatus.data?.hasFacebookCookies ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#dff0e6] px-2 py-0.5 text-[9px] font-black uppercase text-[#2e7d32] dark:bg-[#1b3323] dark:text-[#81c784]">
-                          <Check size={10} strokeWidth={3} /> Cookies Active
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[9px] font-black uppercase text-[#85878e] dark:bg-white/10 dark:text-[#a0a3af]">
-                          1-Click Links
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-2.5 text-xs text-[#686b75] dark:text-[#b7bac6]">
-                      Paste your Facebook cookies (e.g. <code className="font-mono text-[11px] font-bold">c_user=...; xs=...</code> or exported <code className="font-mono text-[11px] font-bold">cookies.txt</code>) to enable direct 1-click downloads for any story link.
-                    </p>
-                    <textarea
-                      rows={4}
-                      value={cookieInput}
-                      onChange={(e) => setCookieInput(e.target.value)}
-                      placeholder="Paste c_user=...; xs=... or Netscape cookies.txt content here"
-                      className="mt-2.5 w-full rounded-xl border border-[#dedfd8] bg-white p-2.5 text-[11px] font-mono text-[#111318] outline-none placeholder:text-[#9b9da5] focus:border-[#5e5ce6] dark:border-white/10 dark:bg-[#111318] dark:text-white"
-                    />
-                  </div>
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      type="button"
-                      disabled={!cookieInput.trim() || saveCookiesMutation.isPending}
-                      onClick={handleSaveCookies}
-                      className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#111318] px-4 text-xs font-black text-white shadow-sm transition hover:bg-[#5e5ce6] active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-[#111318] dark:hover:bg-[#d8ef54]"
-                    >
-                      {saveCookiesMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                      <span>Save & Download URL</span>
-                    </button>
-                    {cookiesStatus.data?.hasFacebookCookies && (
-                      <button
-                        type="button"
-                        onClick={handleClearCookies}
-                        className="inline-flex h-10 items-center justify-center rounded-xl border border-[#dedfd8] px-3 text-xs font-bold text-[#bd554c] hover:bg-[#fff0ee] dark:border-white/10 dark:hover:bg-white/5"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       );
     })()}{media && (status === "ready" || status === "processing" || status === "completed") && (
