@@ -344,6 +344,24 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
         });
       }
 
+      // If format is WebM, also provide MP4 option for maximum device compatibility
+      if (h >= 1440 && container === "webm") {
+        formats.push({
+          id: `extractor-${f.id}-mp4`,
+          container: "mp4",
+          quality: h ? `${h}p` : "source",
+          type: "video",
+          available: true,
+          size: formatBytes(totalBytes),
+          filesize: totalBytes,
+          note: `${noteLabel} · MP4`,
+          downloadUrl: f.url,
+          httpHeaders: resolveFormatHeaders(f.url, f.httpHeaders, platform),
+          audioUrl: bestAudio?.url,
+          audioHeaders: resolveFormatHeaders(bestAudio?.url, bestAudio?.httpHeaders, platform),
+        });
+      }
+
       formats.push({
         id: `extractor-${f.id}`,
         container,
@@ -435,12 +453,21 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
 
   // Best audio-only options
   if (audioOnly.length > 0) {
-    const topAudio = [...audioOnly].sort((a, b) => (b.tbr || 0) - (a.tbr || 0)).slice(0, 2);
+    const sortedAudio = [...audioOnly].sort((a, b) => {
+      const aIsM4a = (a.ext || "").toLowerCase() === "m4a" || (a.acodec || "").includes("mp4a") ? 1 : 0;
+      const bIsM4a = (b.ext || "").toLowerCase() === "m4a" || (b.acodec || "").includes("mp4a") ? 1 : 0;
+      if (aIsM4a !== bIsM4a) return bIsM4a - aIsM4a;
+      return (b.tbr || 0) - (a.tbr || 0);
+    });
+
+    const topAudio = sortedAudio.slice(0, 2);
     for (const f of topAudio) {
       const bytes = f.filesize || (f.tbr && extracted.duration ? Math.round((f.tbr * 1000 / 8) * extracted.duration) : undefined);
+      const rawExt = (f.ext || "m4a").toLowerCase();
+      const container = rawExt === "webm" ? "weba" : rawExt;
       formats.push({
         id: `extractor-${f.id}`,
-        container: f.ext === "m4a" ? "m4a" : (f.ext || "mp3"),
+        container,
         quality: "audio",
         type: "audio",
         available: true,
@@ -836,7 +863,7 @@ export async function prepareDownload(sourceUrl: string, mediaId: string, format
           : `image.${ext}`;
       }
     } else {
-      const ext = format.audioUrl ? "mp4" : (format.container === "jpeg" ? "jpg" : format.container || "mp4");
+      const ext = format.container === "jpeg" ? "jpg" : (format.container || "mp4");
       filename = `cbdrop-${nanoid(6)}.${ext}`;
     }
     const rawFormatId = format.id ? format.id.replace(/^extractor-/, "") : undefined;

@@ -594,7 +594,10 @@ function mergeVideoAudioWithFfmpeg(payload: DownloadPayload, req: Request, res: 
   const audioHeaders = buildFfmpegHeaders(payload.audioHeaders, payload.audioUrl);
 
   const baseName = payload.filename.replace(/\.[a-z0-9]+$/i, "");
-  const outFilename = `${baseName}.mp4`;
+  const isWebm = (payload.container || "").toLowerCase() === "webm";
+  const ext = isWebm ? "webm" : "mp4";
+  const outFilename = `${baseName}.${ext}`;
+  const contentType = isWebm ? "video/webm" : "video/mp4";
 
   // Local temp disk cache for resumable range requests
   const cacheDir = resolve(tmpdir(), "cbdrop_cache");
@@ -602,7 +605,7 @@ function mergeVideoAudioWithFfmpeg(payload: DownloadPayload, req: Request, res: 
     try { mkdirSync(cacheDir, { recursive: true }); } catch {}
   }
   const cacheKey = createHmac("sha256", secret()).update(`${payload.url}_${payload.audioUrl || ""}`).digest("hex").slice(0, 24);
-  const cachePath = resolve(cacheDir, `${cacheKey}.mp4`);
+  const cachePath = resolve(cacheDir, `${cacheKey}.${ext}`);
 
   // Check if range request can be served from existing cache file
   if (req.headers.range && existsSync(cachePath)) {
@@ -616,7 +619,7 @@ function mergeVideoAudioWithFfmpeg(payload: DownloadPayload, req: Request, res: 
           if (start < stats.size) {
             const finalEnd = Math.min(end, stats.size - 1);
             res.status(206)
-              .setHeader("content-type", "video/mp4")
+              .setHeader("content-type", contentType)
               .setHeader("content-disposition", `attachment; filename="${outFilename}"`)
               .setHeader("accept-ranges", "bytes")
               .setHeader("content-range", `bytes ${start}-${finalEnd}/${stats.size}`)
@@ -630,13 +633,22 @@ function mergeVideoAudioWithFfmpeg(payload: DownloadPayload, req: Request, res: 
     } catch {}
   }
 
-  // Check if audio stream is AAC or M4A for zero-overhead copy, otherwise convert audio to AAC
-  const isAacAudio =
-    (payload.audioUrl || "").includes(".m4a") ||
-    (payload.audioUrl || "").includes("mime=audio%2Fmp4");
-  const audioCodecArgs = isAacAudio
-    ? ["-c:a", "copy"]
-    : ["-c:a", "aac", "-b:a", "192k"];
+  let audioCodecArgs: string[];
+  let muxerArgs: string[];
+
+  if (isWebm) {
+    const isOpus = (payload.audioUrl || "").includes("opus") || (payload.audioUrl || "").includes(".weba") || (payload.audioUrl || "").includes("audio%2Fwebm");
+    audioCodecArgs = isOpus ? ["-c:a", "copy"] : ["-c:a", "libopus", "-b:a", "128k"];
+    muxerArgs = ["-f", "webm"];
+  } else {
+    const isAacAudio =
+      (payload.audioUrl || "").includes(".m4a") ||
+      (payload.audioUrl || "").includes("mime=audio%2Fmp4");
+    audioCodecArgs = isAacAudio
+      ? ["-c:a", "copy"]
+      : ["-c:a", "aac", "-b:a", "192k"];
+    muxerArgs = ["-movflags", "frag_keyframe+empty_moov", "-f", "mp4"];
+  }
 
   const args = [
     "-hide_banner",
@@ -649,8 +661,7 @@ function mergeVideoAudioWithFfmpeg(payload: DownloadPayload, req: Request, res: 
     "-map", "1:a:0",
     "-c:v", "copy",
     ...audioCodecArgs,
-    "-movflags", "frag_keyframe+empty_moov",
-    "-f", "mp4",
+    ...muxerArgs,
     "pipe:1",
   ];
 
@@ -741,6 +752,10 @@ function mergeVideoAudioWithFfmpeg(payload: DownloadPayload, req: Request, res: 
       console.error(`[ffmpeg merge exited with code ${code}]:`, stderrOutput);
       if (token) updateDownloadProgress(token, { status: "error", error: stderrOutput.trim() || "merge error" });
       if (!headersSent && !res.headersSent) {
+        if (payload.sourceUrl) {
+          console.warn("[mergeVideoAudioWithFfmpeg] ffmpeg merge failed, falling back to streamYouTubeWithYtDlp:", stderrOutput);
+          return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, payload.container, token, payload.expectedSize);
+        }
         res.status(502).send("Video processing failed: " + (stderrOutput.trim() || "stream mux error"));
         return;
       }
@@ -783,8 +798,8 @@ export function streamYouTubeWithYtDlp(
   const ffmpegBin = getFfmpegPath();
   const cookiesPath = getCookiesPath();
 
-  const isAudio = container === "m4a" || container === "mp3";
-  const rawFormatId = formatId ? formatId.replace(/^extractor-/, "").replace(/-direct$/, "") : undefined;
+  const rawFormatId = formatId ? formatId.replace(/^extractor-/, "").replace(/-direct$/, "").replace(/-mp4$/, "") : undefined;
+  const isAudio = container === "m4a" || container === "mp3" || container === "weba" || container === "opus" || container === "wav" || container === "flac" || (rawFormatId?.includes("audio") ?? false);
 
   // Map DASH format IDs to HLS equivalents which are authorized and do not trigger 403
   const HLS_MAP: Record<string, string> = {
@@ -821,9 +836,19 @@ export function streamYouTubeWithYtDlp(
   let formatArg: string;
   if (isYouTube) {
     if (isAudio) {
+      if (container === "weba" || container === "opus") {
+        formatArg = rawFormatId
+          ? `${rawFormatId}/251/250/249/ba[ext=webm]/ba/bestaudio/best`
+          : "251/250/249/ba[ext=webm]/ba/bestaudio/best";
+      } else {
+        formatArg = rawFormatId
+          ? `${rawFormatId}/${HLS_AUDIO}/ba/bestaudio/best`
+          : `${HLS_AUDIO}/ba/bestaudio/best`;
+      }
+    } else if (container === "webm") {
       formatArg = rawFormatId
-        ? `${rawFormatId}/${HLS_AUDIO}/ba/bestaudio/best`
-        : `${HLS_AUDIO}/ba/bestaudio/best`;
+        ? `${rawFormatId}+251/${rawFormatId}+250/${rawFormatId}+ba[ext=webm]/bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/bv*+ba/best`
+        : `bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/bv*+ba/best`;
     } else if (rawFormatId) {
       const hlsId = HLS_MAP[rawFormatId];
       if (hlsId && hlsId !== rawFormatId) {
@@ -903,6 +928,31 @@ export function streamYouTubeWithYtDlp(
       "-f", "mp4",
       "pipe:1",
     ];
+  } else if (container === "weba" || container === "opus") {
+    contentType = "audio/webm";
+    outFilename = `${baseName}.weba`;
+    ffmpegArgs = [
+      "-hide_banner",
+      "-loglevel", "error",
+      "-i", "pipe:0",
+      "-vn",
+      "-c:a", "libopus",
+      "-b:a", "128k",
+      "-f", "webm",
+      "pipe:1",
+    ];
+  } else if (container === "wav") {
+    contentType = "audio/wav";
+    outFilename = `${baseName}.wav`;
+    ffmpegArgs = [
+      "-hide_banner",
+      "-loglevel", "error",
+      "-i", "pipe:0",
+      "-vn",
+      "-c:a", "pcm_s16le",
+      "-f", "wav",
+      "pipe:1",
+    ];
   } else if (container === "webm") {
     contentType = "video/webm";
     outFilename = `${baseName}.webm`;
@@ -911,7 +961,8 @@ export function streamYouTubeWithYtDlp(
       "-loglevel", "error",
       "-i", "pipe:0",
       "-c:v", "copy",
-      "-c:a", "copy",
+      "-c:a", "libopus",
+      "-b:a", "128k",
       "-f", "webm",
       "pipe:1",
     ];
@@ -1116,12 +1167,12 @@ export function registerDownloadProxy(app: Express) {
         return await proxyHttpMedia(payload, req, res, token);
       }
 
-      // YouTube video and audio should ALWAYS route through streamYouTubeWithYtDlp using authorized HLS
-      // to avoid Google Video 403 Forbidden datacenter blocks
-      if (isYouTube && payload.sourceUrl) {
-        return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, payload.container, token, payload.expectedSize);
+      // True MP3 audio conversion via libmp3lame
+      if (payload.container === "mp3" && payload.sourceUrl && !payload.url.includes(".mp3")) {
+        return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, "mp3", token, payload.expectedSize);
       }
 
+      // Direct video + audio merge via ffmpeg (supports WebM VP9+Opus, MP4 H264+AAC)
       if (payload.audioUrl) {
         return mergeVideoAudioWithFfmpeg(payload, req, res, token);
       }
@@ -1130,14 +1181,18 @@ export function registerDownloadProxy(app: Express) {
         return proxyManifestWithFfmpeg(payload, res);
       }
 
-      try {
-        await proxyHttpMedia(payload, req, res, token);
-      } catch (proxyError) {
-        if (payload.sourceUrl && !res.headersSent) {
+      // Direct video/audio streams (e.g. 4K direct stream, standalone audio)
+      if (payload.url && !payload.url.startsWith("http://localhost")) {
+        try {
+          return await proxyHttpMedia(payload, req, res, token);
+        } catch (proxyError) {
           console.warn("[DOWNLOAD] proxyHttpMedia failed, falling back to streaming with yt-dlp:", proxyError);
-          return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, payload.container, token, payload.expectedSize);
         }
-        throw proxyError;
+      }
+
+      // Stream with yt-dlp (handles authorized HLS and platform extractors)
+      if (payload.sourceUrl) {
+        return streamYouTubeWithYtDlp(payload.sourceUrl, payload.formatId, payload.filename, res, payload.container, token, payload.expectedSize);
       }
     } catch (error) {
       console.error("[handleDownload error]:", error);
