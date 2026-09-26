@@ -1153,9 +1153,14 @@ export function streamYouTubeWithYtDlp(
   ytdlp.on("close", (code) => {
     if (code !== 0) {
       console.warn(`[yt-dlp stream process exited with code ${code}]:`, ytdlpStderr.slice(-500));
-      if (token) updateDownloadProgress(token, { status: "error", error: ytdlpStderr.trim() || `exit ${code}` });
+      const cleanError = ytdlpStderr
+        .split("\n")
+        .filter((l) => l.includes("ERROR:") || l.includes("error:"))
+        .map((l) => l.replace(/.*ERROR:\s*/i, "").trim())
+        .pop() || "Stream connection failed";
+      if (token) updateDownloadProgress(token, { status: "error", error: cleanError });
       if (!headersSent && !res.headersSent) {
-        res.status(502).send("Stream extraction failed: " + (ytdlpStderr.trim() || `exit code ${code}`));
+        res.status(502).send("Stream extraction failed: " + cleanError);
       }
     }
   });
@@ -1163,9 +1168,14 @@ export function streamYouTubeWithYtDlp(
   ffmpeg.on("close", (code) => {
     if (code !== 0) {
       console.warn(`[ffmpeg stream process exited with code ${code}]:`, ffmpegStderr.slice(-500));
-      if (token) updateDownloadProgress(token, { status: "error", error: ffmpegStderr.trim() || `exit ${code}` });
+      const cleanError = ffmpegStderr
+        .split("\n")
+        .filter((l) => l.includes("Error") || l.includes("Invalid"))
+        .map((l) => l.trim())
+        .pop() || "Stream processing failed";
+      if (token) updateDownloadProgress(token, { status: "error", error: cleanError });
       if (!headersSent && !res.headersSent) {
-        res.status(502).send("Stream processing failed: " + (ffmpegStderr.trim() || `exit code ${code}`));
+        res.status(502).send("Stream processing failed: " + cleanError);
         return;
       }
     } else if (token) {

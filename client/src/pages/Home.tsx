@@ -1405,7 +1405,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                       {activeDownload.status === "downloading" && "Downloading · Fast direct stream"}
                       {activeDownload.status === "preparing" && "Connecting to media stream..."}
                       {activeDownload.status === "interrupted" && "Connection paused or network dropped · Waiting to resume"}
-                      {activeDownload.status === "error" && (activeDownload.error || "Download error encountered")}
+                      {activeDownload.status === "error" && (activeDownload.error && !activeDownload.error.includes("[download]") && !activeDownload.error.includes("[youtube]") ? activeDownload.error : "Download failed · Stream disconnected. Tap retry.")}
                     </p>
                   </div>
                 </div>
@@ -1415,6 +1415,8 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                     className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${
                       activeDownload.status === "completed"
                         ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                        : activeDownload.status === "error"
+                        ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
                         : activeDownload.status === "interrupted"
                         ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 animate-pulse"
                         : activeDownload.status === "resuming"
@@ -1426,6 +1428,8 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                       className={`size-1.5 rounded-full ${
                         activeDownload.status === "completed"
                           ? "bg-emerald-500"
+                          : activeDownload.status === "error"
+                          ? "bg-rose-500"
                           : activeDownload.status === "interrupted"
                           ? "bg-amber-500"
                           : activeDownload.status === "resuming"
@@ -1436,6 +1440,8 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                     <span>
                       {activeDownload.status === "completed"
                         ? "Completed"
+                        : activeDownload.status === "error"
+                        ? "Failed"
                         : activeDownload.status === "interrupted"
                         ? "Paused"
                         : activeDownload.status === "resuming"
@@ -1534,6 +1540,15 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
                       >
                         <RefreshCw size={11} />
                         <span>Resume</span>
+                      </button>
+                    )}
+                    {activeDownload.status === "error" && (
+                      <button
+                        onClick={() => triggerFileDownload(activeDownload.downloadUrl, activeDownload.filename)}
+                        className="inline-flex items-center gap-1 rounded-full bg-rose-500/20 px-2.5 py-0.5 text-[10px] font-black text-rose-700 dark:text-rose-300 hover:bg-rose-500/30 transition"
+                      >
+                        <RefreshCw size={11} />
+                        <span>Retry</span>
                       </button>
                     )}
                     {activeDownload.status === "completed" && (
