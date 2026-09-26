@@ -377,49 +377,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [storyHtml, setStoryHtml] = useState("");
   const [cookieInput, setCookieInput] = useState("");
-  const [activeDownload, setActiveDownload] = useState<ActiveDownload | null>(null);
-
-  useEffect(() => {
-    if (!activeDownload || activeDownload.status === "completed" || activeDownload.status === "error") {
-      return;
-    }
-    const token = activeDownload.token;
-    let isMounted = true;
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/download-progress/${token}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!isMounted) return;
-
-        setActiveDownload((prev) => {
-          if (!prev || prev.token !== token) return prev;
-          if (data.status && data.status !== "idle") {
-            return {
-              ...prev,
-              status: data.status,
-              downloadedBytes: data.downloadedBytes,
-              totalBytes: data.totalBytes || prev.totalBytes,
-              speed: data.speed,
-              eta: data.eta,
-              error: data.error,
-            };
-          }
-          return prev;
-        });
-
-        if (data.status === "completed") {
-          clearInterval(pollInterval);
-        }
-      } catch {}
-    }, 600);
-
-    return () => {
-      isMounted = false;
-      clearInterval(pollInterval);
-    };
-  }, [activeDownload?.token, activeDownload?.status]);
 
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledMediaIdRef = useRef<string | null>(null);
@@ -516,22 +473,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
         const isMulti = imageFormats.length > 1;
         const defaultName = format.type === "audio" ? `audio.${format.container}` : (isMulti ? `image-${index + 1}.${format.container}` : `image.${format.container}`);
         const filename = result.filename || defaultName;
-        const tokenMatch = result.downloadUrl.match(/\/api\/download\/([^.]+)\./);
-        const token = tokenMatch ? tokenMatch[1] : "";
-        if (token) {
-          setActiveDownload({
-            token,
-            downloadUrl: result.downloadUrl,
-            filename,
-            quality: format.quality,
-            container: format.container.toUpperCase(),
-            status: "preparing",
-            downloadedBytes: 0,
-            totalBytes: (format as any).filesize || 0,
-            speed: 0,
-            eta: 0,
-          });
-        }
         triggerFileDownload(result.downloadUrl, filename);
         toast.success(format.type === "audio" ? "Audio track downloaded" : (isMulti ? `Image ${index + 1} downloaded` : "Image downloaded"));
       } else {
@@ -783,22 +724,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
             description: `${selected.container.toUpperCase()} · ${selected.quality} · ${selected.size}`,
           });
           if (result.status === "completed" && result.downloadUrl) {
-            const tokenMatch = result.downloadUrl.match(/\/api\/download\/([^.]+)\./);
-            const token = tokenMatch ? tokenMatch[1] : "";
-            if (token) {
-              setActiveDownload({
-                token,
-                downloadUrl: result.downloadUrl,
-                filename: result.filename,
-                quality: selected.quality,
-                container: selected.container.toUpperCase(),
-                status: "preparing",
-                downloadedBytes: 0,
-                totalBytes: (selected as any).filesize || 0,
-                speed: 0,
-                eta: 0,
-              });
-            }
             triggerFileDownload(result.downloadUrl, result.filename);
           }
         },
@@ -817,22 +742,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
       return;
     }
     if (job.downloadUrl) {
-      const tokenMatch = job.downloadUrl.match(/\/api\/download\/([^.]+)\./);
-      const token = tokenMatch ? tokenMatch[1] : "";
-      if (token) {
-        setActiveDownload({
-          token,
-          downloadUrl: job.downloadUrl,
-          filename: job.filename || (selected.type === "image" ? "image.jpg" : "video.mp4"),
-          quality: selected.quality,
-          container: selected.container.toUpperCase(),
-          status: "resuming",
-          downloadedBytes: 0,
-          totalBytes: (selected as any).filesize || 0,
-          speed: 0,
-          eta: 0,
-        });
-      }
       triggerFileDownload(job.downloadUrl, job.filename || (selected.type === "image" ? "image.jpg" : "video.mp4"));
       return;
     }
@@ -955,7 +864,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
   </button>
 )}</div></div></div>}</header>
 
-    <main id="top"><section className="relative overflow-hidden border-b border-[#e4e5de] dark:border-white/10"><div className="absolute left-[-8rem] top-[-10rem] size-[34rem] rounded-full bg-[#d8ef54]/20 blur-3xl dark:bg-[#d8ef54]/10" /><div className="absolute right-[-12rem] top-[10rem] size-[32rem] rounded-full bg-[#b8b7ff]/30 blur-3xl dark:bg-[#5e5ce6]/20" /><div className="container relative grid gap-12 py-12 sm:py-16 lg:grid-cols-[1.04fr_.96fr] lg:items-center lg:gap-16 lg:py-24"><div className="max-w-[680px] mx-auto lg:mx-0 flex flex-col items-center lg:items-start text-center lg:text-left"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#dfe0d8] bg-white/70 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-[#5e5ce6] shadow-[0_5px_20px_rgba(17,18,24,0.04)] dark:border-white/10 dark:bg-white/5"><Sparkles size={13} />{preset?.badgeText || "Media, made simple"}</div><h1 className="max-w-[720px] text-4xl sm:text-5xl lg:text-[4.75rem] font-black leading-[0.95] tracking-[-0.07em]">{preset ? (<>{preset.heroHeadline}<br /><span className="relative inline-block text-[#5e5ce6]">{preset.heroHighlight}<span className="absolute -bottom-1 left-1 h-2 w-[92%] rounded-full bg-[#d8ef54] sm:-bottom-2 sm:h-3" /></span><span className="relative z-10">.</span></>) : (<>Download media,<br /><span className="relative inline-block text-[#5e5ce6]">simply<span className="absolute -bottom-1 left-1 h-2 w-[92%] rounded-full bg-[#d8ef54] sm:-bottom-2 sm:h-3" /></span><span className="relative z-10">.</span></>)}</h1><p className="mt-6 max-w-[520px] text-[16px] leading-7 text-[#686b75] dark:text-[#b7bac6] sm:text-[18px] sm:leading-8">{preset?.heroSubheadline || "Paste a public social-media URL and get started in seconds. CBdrop keeps the workflow clear, lightweight, and permission-first."}</p><form onSubmit={handleAnalyze} noValidate className="mt-8 w-full max-w-[660px] text-left"><div className={`group relative flex flex-col gap-2 rounded-[22px] border bg-white p-2 shadow-[0_18px_50px_rgba(36,38,51,0.10)] transition focus-within:border-[#5e5ce6] focus-within:ring-4 focus-within:ring-[#5e5ce6]/10 dark:bg-[#1a1c22] ${error ? "border-[#e17b72]" : "border-[#dedfd8] dark:border-white/10"}`}><div className="flex min-h-[58px] items-center gap-3 px-3 sm:pl-4 sm:pr-[160px]"><Link2 size={19} className="shrink-0 text-[#8a8c95]" /><input ref={inputRef} value={url} onChange={(event) => setUrl(event.target.value)} onPaste={(event) => {
+    <main id="top"><section className="relative overflow-hidden border-b border-[#e4e5de] dark:border-white/10"><div className="absolute left-[-8rem] top-[-10rem] size-[34rem] rounded-full bg-[#d8ef54]/20 blur-3xl dark:bg-[#d8ef54]/10" /><div className="absolute right-[-12rem] top-[10rem] size-[32rem] rounded-full bg-[#b8b7ff]/30 blur-3xl dark:bg-[#5e5ce6]/20" /><div className="container relative grid gap-12 py-12 sm:py-16 lg:grid-cols-[1.04fr_.96fr] lg:items-center lg:gap-16 lg:py-24"><div className="max-w-[680px] mx-auto lg:mx-0 flex flex-col items-center lg:items-start text-center lg:text-left"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#dfe0d8] bg-white/70 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-[#5e5ce6] shadow-[0_5px_20px_rgba(17,18,24,0.04)] dark:border-white/10 dark:bg-white/5"><Sparkles size={13} />{preset?.badgeText || "Media, made simple"}</div><h1 className="max-w-[720px] text-4xl sm:text-5xl lg:text-[4.75rem] font-black leading-[0.95] tracking-[-0.07em]">{preset ? (<>{preset.heroHeadline}<br /><span className="relative inline-block text-[#5e5ce6]">{preset.heroHighlight}<span className="absolute -bottom-1 left-1 h-2 w-[92%] rounded-full bg-[#d8ef54] sm:-bottom-2 sm:h-3" /></span><span className="relative z-10">.</span></>) : (<>Download media,<br /><span className="relative inline-block text-[#5e5ce6]">simply<span className="absolute -bottom-1 left-1 h-2 w-[92%] rounded-full bg-[#d8ef54] sm:-bottom-2 sm:h-3" /></span><span className="relative z-10">.</span></>)}</h1><p className="mt-6 max-w-[520px] text-[16px] leading-7 text-[#686b75] dark:text-[#b7bac6] sm:text-[18px] sm:leading-8">{preset?.heroSubheadline || "Paste a public social-media URL and get started in seconds. CBdrop keeps the workflow clear, lightweight, and permission-first."}</p><form onSubmit={handleAnalyze} noValidate className="mt-6 sm:mt-8 w-full max-w-[660px] text-left"><div className={`group relative flex flex-col gap-2 rounded-[22px] border bg-white p-1.5 sm:p-2 shadow-[0_18px_50px_rgba(36,38,51,0.10)] transition focus-within:border-[#5e5ce6] focus-within:ring-4 focus-within:ring-[#5e5ce6]/10 dark:bg-[#1a1c22] ${error ? "border-[#e17b72]" : "border-[#dedfd8] dark:border-white/10"}`}><div className="flex min-h-[54px] sm:min-h-[58px] items-center gap-2 sm:gap-3 px-2.5 sm:pl-4 sm:pr-[160px]"><Link2 size={19} className="shrink-0 text-[#8a8c95]" /><input ref={inputRef} value={url} onChange={(event) => setUrl(event.target.value)} onPaste={(event) => {
   const pastedText = event.clipboardData.getData("text");
   if (pastedText) {
     const clean = pastedText.trim();
@@ -1452,165 +1361,8 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
             </div>
           </div>
 
-          {/* Active Download Progress Card */}
-          {activeDownload && (
-            <div className="mt-3.5 overflow-hidden rounded-2xl border border-[#dedfd8] bg-white p-3.5 sm:p-4 shadow-[0_10px_30px_rgba(17,18,24,0.06)] dark:border-white/10 dark:bg-[#1f2128]">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${
-                    activeDownload.status === "completed"
-                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : activeDownload.status === "interrupted"
-                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                      : activeDownload.status === "resuming"
-                      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
-                      : "bg-[#5e5ce6]/15 text-[#5e5ce6] dark:bg-[#d8ef54]/15 dark:text-[#d8ef54]"
-                  }`}>
-                    {activeDownload.status === "completed" ? (
-                      <CheckCircle2 size={20} strokeWidth={2.5} />
-                    ) : activeDownload.status === "interrupted" ? (
-                      <AlertCircle size={20} strokeWidth={2.5} />
-                    ) : activeDownload.status === "resuming" ? (
-                      <RefreshCw size={18} className="animate-spin" />
-                    ) : (
-                      <ArrowDownCircle size={20} className="animate-pulse" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-xs sm:text-sm font-black text-[#111318] dark:text-white" title={activeDownload.filename}>
-                        {activeDownload.filename}
-                      </p>
-                      <span className="shrink-0 rounded-md bg-[#f0f0ed] px-2 py-0.5 text-[10px] font-bold text-[#686b75] dark:bg-white/10 dark:text-[#b7bac6]">
-                        {activeDownload.container} · {activeDownload.quality}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[11px] font-semibold text-[#8a8d98] dark:text-[#9ea1ae]">
-                      {activeDownload.status === "completed" && "Download complete · Saved to browser downloads"}
-                      {activeDownload.status === "resuming" && "Connection active · Resuming from last byte..."}
-                      {activeDownload.status === "downloading" && "Downloading via browser manager · Resumable stream"}
-                      {activeDownload.status === "preparing" && "Connecting to media stream..."}
-                      {activeDownload.status === "interrupted" && "Connection paused or network dropped · Waiting to resume"}
-                      {activeDownload.status === "error" && (activeDownload.error || "Download error encountered")}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${
-                    activeDownload.status === "completed"
-                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                      : activeDownload.status === "interrupted"
-                      ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 animate-pulse"
-                      : activeDownload.status === "resuming"
-                      ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
-                      : "bg-[#5e5ce6]/10 text-[#5e5ce6] dark:bg-[#d8ef54]/10 dark:text-[#d8ef54]"
-                  }`}>
-                    <span className={`size-1.5 rounded-full ${
-                      activeDownload.status === "completed" ? "bg-emerald-500" :
-                      activeDownload.status === "interrupted" ? "bg-amber-500" :
-                      activeDownload.status === "resuming" ? "bg-blue-500 animate-ping" :
-                      "bg-[#5e5ce6] dark:bg-[#d8ef54] animate-pulse"
-                    }`} />
-                    <span>
-                      {activeDownload.status === "completed" ? "Completed" :
-                       activeDownload.status === "interrupted" ? "Paused" :
-                       activeDownload.status === "resuming" ? "Resuming..." :
-                       activeDownload.status === "preparing" ? "Connecting..." :
-                       "Downloading"}
-                    </span>
-                  </span>
-                  <button
-                    onClick={() => setActiveDownload(null)}
-                    className="rounded-full p-1 text-[#8a8d98] hover:bg-[#f0f0ed] dark:text-[#9ea1ae] dark:hover:bg-white/10"
-                    title="Dismiss card"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Progress Bar */}
-              <div className="mt-3">
-                <div className="relative h-2 w-full overflow-hidden rounded-full bg-[#f0f0ed] dark:bg-white/10">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      activeDownload.status === "completed"
-                        ? "bg-emerald-500"
-                        : activeDownload.status === "interrupted"
-                        ? "bg-amber-500"
-                        : activeDownload.status === "resuming"
-                        ? "bg-gradient-to-r from-blue-500 to-indigo-500 animate-pulse"
-                        : "bg-gradient-to-r from-[#5e5ce6] to-[#d8ef54]"
-                    }`}
-                    style={{
-                      width: activeDownload.totalBytes > 0
-                        ? `${Math.min(100, Math.max(activeDownload.downloadedBytes > 0 ? 3 : 0, Math.round((activeDownload.downloadedBytes / activeDownload.totalBytes) * 100)))}%`
-                        : activeDownload.status === "completed"
-                        ? "100%"
-                        : "40%",
-                    }}
-                  />
-                </div>
-
-                <div className="mt-2 flex items-center justify-between text-[11px] font-semibold text-[#686b75] dark:text-[#b7bac6]">
-                  <div>
-                    {activeDownload.downloadedBytes > 0 ? (
-                      <span>
-                        <strong className="text-[#111318] dark:text-white">
-                          {formatBytes(activeDownload.downloadedBytes)}
-                        </strong>
-                        {activeDownload.totalBytes > 0 && ` / ${formatBytes(activeDownload.totalBytes)}`}
-                        {activeDownload.totalBytes > 0 && (
-                          <span className="ml-1 text-[#8a8d98] dark:text-[#9ea1ae]">
-                            ({Math.round((activeDownload.downloadedBytes / activeDownload.totalBytes) * 100)}%)
-                          </span>
-                        )}
-                      </span>
-                    ) : activeDownload.totalBytes > 0 ? (
-                      <span>Total size: <strong className="text-[#111318] dark:text-white">{formatBytes(activeDownload.totalBytes)}</strong></span>
-                    ) : (
-                      <span>Determining file size...</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2.5">
-                    {activeDownload.speed > 0 && (
-                      <span className="font-bold text-[#5e5ce6] dark:text-[#d8ef54]">
-                        {formatSpeed(activeDownload.speed)}
-                      </span>
-                    )}
-                    {activeDownload.eta > 0 && activeDownload.status === "downloading" && (
-                      <span className="text-[#8a8d98] dark:text-[#9ea1ae]">
-                        {formatETA(activeDownload.eta)}
-                      </span>
-                    )}
-                    {activeDownload.status === "interrupted" && (
-                      <button
-                        onClick={() => triggerFileDownload(activeDownload.downloadUrl, activeDownload.filename)}
-                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[10px] font-black text-amber-700 dark:text-amber-300 hover:bg-amber-500/30 transition"
-                      >
-                        <RefreshCw size={11} />
-                        <span>Resume</span>
-                      </button>
-                    )}
-                    {activeDownload.status === "completed" && (
-                      <button
-                        onClick={() => triggerFileDownload(activeDownload.downloadUrl, activeDownload.filename)}
-                        className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-black text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/30 transition"
-                      >
-                        <Download size={11} />
-                        <span>Save again</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Success Banner */}
-          {isSelectedJobCompleted && !activeDownload && (
+          {isSelectedJobCompleted && (
             <div className="mt-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl bg-[#f5f8df] p-3 sm:p-3.5 text-[#525f0e] dark:bg-[#252c16] dark:text-[#d2f54a] border border-[#e1ebad] dark:border-white/10">
               <div className="flex items-start gap-2.5">
                 <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-[#60700f] dark:text-[#d2f54a]" />
