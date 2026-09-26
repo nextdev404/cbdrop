@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ExtractedFormat, ExtractedMedia } from "./types";
@@ -270,14 +271,48 @@ export function normalizeYtDlpResult(raw: Record<string, unknown>): ExtractedMed
 }
 
 
-export function getCookiesPath(): string | null {
+export function getCookiesPath(platform?: string): string | null {
+  const igSession = process.env.INSTAGRAM_SESSION_ID?.trim();
+  const igCookies = process.env.INSTAGRAM_COOKIES?.trim();
+  if (platform === "Instagram" && (igSession || igCookies)) {
+    const igCookiePath = resolve(tmpdir(), "cbdrop_ig_cookies.txt");
+    try {
+      let content = "# Netscape HTTP Cookie File\n";
+      if (igSession) {
+        content += `.instagram.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\t${igSession}\n`;
+        content += `.instagram.com\tTRUE\t/\tTRUE\t2147483647\tds_user_id\t123456789\n`;
+      }
+      if (igCookies) {
+        content += `${igCookies}\n`;
+      }
+      writeFileSync(igCookiePath, content, "utf-8");
+      return igCookiePath;
+    } catch {}
+  }
+
   if (process.env.YTDLP_COOKIES_PATH && existsSync(process.env.YTDLP_COOKIES_PATH)) {
     return process.env.YTDLP_COOKIES_PATH;
   }
   const rootCookies = resolve(process.cwd(), "cookies.txt");
-  if (existsSync(rootCookies)) return rootCookies;
+  if (existsSync(rootCookies)) {
+    if (platform === "Instagram") {
+      try {
+        const c = readFileSync(rootCookies, "utf-8");
+        if (!c.includes("sessionid")) return null;
+      } catch {}
+    }
+    return rootCookies;
+  }
   const serverCookies = resolve(process.cwd(), "server/cookies.txt");
-  if (existsSync(serverCookies)) return serverCookies;
+  if (existsSync(serverCookies)) {
+    if (platform === "Instagram") {
+      try {
+        const c = readFileSync(serverCookies, "utf-8");
+        if (!c.includes("sessionid")) return null;
+      } catch {}
+    }
+    return serverCookies;
+  }
   return null;
 }
 
@@ -360,7 +395,7 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
   } catch {}
 
   const executable = getExecutablePath();
-  const cookiesPath = getCookiesPath();
+  const cookiesPath = getCookiesPath(platform);
 
   const isYouTube = targetUrl.includes("youtube.com") || targetUrl.includes("youtu.be");
   const isYouTubeVideo = isYouTube && !targetUrl.includes("/post/") && !targetUrl.includes("/community");
@@ -374,13 +409,17 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
     "--remote-components", "ejs:github",
   ];
 
+  if (isYouTube) {
+    commonArgs.push("--extractor-args", "youtube:player_client=android,web");
+  }
+
   const ffmpegLocation = resolve(process.cwd(), "bin/ffmpeg");
   if (existsSync(ffmpegLocation)) {
     commonArgs.push("--ffmpeg-location", ffmpegLocation);
   }
 
   if (platform === "Instagram") {
-    commonArgs.push("--impersonate", "chrome");
+    commonArgs.push("--impersonate", "chrome-136");
   }
 
   if (cookiesPath) {
@@ -458,7 +497,7 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
     }
     if (platform === "Instagram" && /empty media response|not granting access|login|login_required/i.test(message)) {
       throw new Error(
-        "This Instagram post is private, restricted, or requires an Instagram account to view. CBdrop only downloads public posts."
+        "Instagram is requesting authentication for this post. You can paste the page source (view-source:https://www.instagram.com/...) into CBdrop, or set INSTAGRAM_SESSION_ID in Render environment variables for 24/7 direct downloads."
       );
     }
     if (platform === "Snapchat" && /404|not found/i.test(message)) {
@@ -689,10 +728,191 @@ export async function extractTwitterFallback(url: string): Promise<ExtractedMedi
   }
 }
 
+export function isInstagramHtml(content: string): boolean {
+  if (!content || typeof content !== "string") return false;
+  const s = content.trim();
+  const lower = s.toLowerCase();
+  if (
+    lower.startsWith("<") ||
+    lower.startsWith("view-source:") ||
+    lower.includes("video_url") ||
+    lower.includes("display_url") ||
+    lower.includes("xdt_shortcode_media") ||
+    lower.includes("cdninstagram.com")
+  ) {
+    return (
+      (lower.includes("instagram.com") || lower.includes("cdninstagram.com")) &&
+      (lower.includes("video_url") ||
+        lower.includes("display_url") ||
+        lower.includes("xdt_shortcode_media") ||
+        lower.includes("shortcode") ||
+        lower.includes("og:video") ||
+        lower.includes("og:image") ||
+        lower.includes("instagram"))
+    );
+  }
+  return false;
+}
+
+export function parseInstagramHtml(html: string, originalUrl?: string): ExtractedMedia | null {
+  if (!html || typeof html !== "string") return null;
+
+  function cleanUrl(raw: string): string {
+    return raw
+      .replace(/\\\\/g, "")
+      .replace(/\\\/|\//g, (m) => (m === "\\/" ? "/" : m))
+      .replace(/\\u0026/g, "&")
+      .replace(/&amp;/g, "&")
+      .trim();
+  }
+
+  const seenUrls = new Set<string>();
+  const formats: ExtractedFormat[] = [];
+  const thumbnails: Array<{ url: string; id: string; width?: number; height?: number }> = [];
+
+  // 1. Video extraction (HTML5 video tags, JSON video_url, og:video)
+  const videoPatterns = [
+    /"video_url"\s*:\s*"([^"]+)"/g,
+    /"browser_native_hd_url"\s*:\s*"([^"]+)"/g,
+    /"browser_native_sd_url"\s*:\s*"([^"]+)"/g,
+    /<meta\s+(?:property|name)="og:video(?::secure_url)?"\s+content="([^"]+)"/gi,
+    /content="([^"]+)"\s+(?:property|name)="og:video(?::secure_url)?"/gi,
+    /<video[^>]+src="([^"]+)"/gi,
+    /<source[^>]+src="([^"]+)"(?:\s+type="video\/mp4")?/gi,
+  ];
+
+  for (const pattern of videoPatterns) {
+    for (const match of Array.from(html.matchAll(pattern))) {
+      const u = cleanUrl(match[1]);
+      if (u.startsWith("http") && !seenUrls.has(u) && !u.includes("static.cdninstagram.com")) {
+        seenUrls.add(u);
+        formats.push({
+          id: `video-${formats.length + 1}`,
+          url: u,
+          ext: "mp4",
+          vcodec: "h264",
+          acodec: "aac",
+          height: 1080,
+          formatNote: "Video",
+          httpHeaders: { Referer: "https://www.instagram.com/" },
+        });
+      }
+    }
+  }
+
+  // 2. Photos / Images (display_url, og:image, EmbeddedMediaImage)
+  const photoPatterns = [
+    /"display_url"\s*:\s*"([^"]+)"/g,
+    /<meta\s+(?:property|name)="og:image"\s+content="([^"]+)"/gi,
+    /content="([^"]+)"\s+(?:property|name)="og:image"/gi,
+    /<link\s+rel="preload"\s+href="([^"]+)"\s+as="image"/gi,
+    /class="EmbeddedMediaImage"[^>]+src="([^"]+)"/gi,
+    /<img[^>]+src="([^"]*cdninstagram\.com[^"]*)"/gi,
+  ];
+
+  for (const pattern of photoPatterns) {
+    for (const match of Array.from(html.matchAll(pattern))) {
+      const u = cleanUrl(match[1]);
+      if (
+        u.startsWith("http") &&
+        !seenUrls.has(u) &&
+        !u.includes("static.cdninstagram.com") &&
+        !u.includes("rsrc.php") &&
+        !/(?:s150x150|s320x320)/i.test(u)
+      ) {
+        seenUrls.add(u);
+        thumbnails.push({ url: u, id: `photo-${thumbnails.length + 1}` });
+        formats.push({
+          id: `photo-${formats.length + 1}`,
+          url: u,
+          ext: "jpg",
+          vcodec: "none",
+          acodec: "none",
+          formatNote: "Photo",
+          httpHeaders: { Referer: "https://www.instagram.com/" },
+        });
+      }
+    }
+  }
+
+  if (formats.length === 0) return null;
+
+  // Title / Caption
+  const captionMatch =
+    html.match(/"edge_media_to_caption"\s*:\s*\{\s*"edges"\s*:\s*\[\s*\{\s*"node"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/i) ||
+    html.match(/<meta\s+(?:property|name)="og:title"\s+content="([^"]+)"/i) ||
+    html.match(/<title>([^<]+)<\/title>/i);
+  const rawTitle = captionMatch ? cleanUrl(captionMatch[1]) : "Instagram Post";
+  const title = rawTitle.replace(/\s*\|\s*Instagram$/i, "").trim() || "Instagram Post";
+
+  // Author
+  const authorMatch =
+    html.match(/"owner"\s*:\s*\{[^}]*?"username"\s*:\s*"([^"]+)"/i) ||
+    html.match(/class="UsernameText"[^>]*>([^<]+)</i) ||
+    html.match(/<meta\s+(?:property|name)="author"\s+content="([^"]+)"/i);
+  const uploader = authorMatch ? cleanUrl(authorMatch[1].replace(/<[^>]+>/g, "")) : "Instagram creator";
+
+  // ID / Shortcode
+  let id = "";
+  if (originalUrl) {
+    const m = originalUrl.match(/\/(?:p|reel|tv)\/([a-zA-Z0-9_-]+)/i);
+    if (m) id = m[1];
+  }
+  if (!id) {
+    const idM = html.match(/"shortcode"\s*:\s*"([^"]+)"/i);
+    if (idM) id = idM[1];
+  }
+  if (!id) id = `ig_${Date.now()}`;
+
+  // Multi-photo label
+  const photoFormats = formats.filter((f) => f.vcodec === "none");
+  if (photoFormats.length > 1) {
+    photoFormats.forEach((f, i) => {
+      f.formatNote = `Photo ${i + 1} · Item ${i + 1}`;
+    });
+  }
+
+  return {
+    id,
+    title,
+    uploader,
+    platform: "Instagram",
+    formats,
+    thumbnails: thumbnails.length > 0 ? thumbnails : undefined,
+    thumbnail: thumbnails[0]?.url || formats[0]?.url,
+  };
+}
+
 export async function extractInstagramFallback(url: string): Promise<ExtractedMedia | null> {
   const match = url.match(/\/(?:p|reel|tv)\/([a-zA-Z0-9_-]+)/i);
   if (!match) return null;
   const shortcode = match[1];
+
+  // 1. Try bot User-Agents on direct reel/post URL
+  const uas = [
+    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+    "TelegramBot (like TwitterBot)",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  ];
+
+  for (const ua of uas) {
+    try {
+      const res = await fetch(`https://www.instagram.com/reel/${shortcode}/`, {
+        headers: {
+          "User-Agent": ua,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        redirect: "follow",
+      });
+      if (!res.ok) continue;
+      const html = await res.text();
+      const parsed = parseInstagramHtml(html, url);
+      if (parsed && parsed.formats.length > 0) return parsed;
+    } catch {}
+  }
+
+  // 2. Try embed page
   try {
     const embedUrl = `https://www.instagram.com/p/${shortcode}/embed/captioned/`;
     const res = await fetch(embedUrl, {
@@ -702,39 +922,14 @@ export async function extractInstagramFallback(url: string): Promise<ExtractedMe
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
     });
-    if (!res.ok) return null;
-    const html = await res.text();
-    const imgMatches = Array.from(html.matchAll(/class="EmbeddedMediaImage"[^>]+src="([^"]+)"/g)).map((m) => m[1])
-      .concat(Array.from(html.matchAll(/<img[^>]+src="([^"]*cdninstagram\.com[^"]*)"/g)).map((m) => m[1]));
-    const cleanUrls = Array.from(new Set(imgMatches.map((u) => u.replace(/&amp;/g, "&"))))
-      .filter((u) => !u.includes("s150x150") && !u.includes("/s320x320/"));
-    if (cleanUrls.length === 0) return null;
+    if (res.ok) {
+      const html = await res.text();
+      const parsed = parseInstagramHtml(html, url);
+      if (parsed && parsed.formats.length > 0) return parsed;
+    }
+  } catch {}
 
-    const formats: ExtractedFormat[] = cleanUrls.map((imgUrl, idx) => ({
-      id: `photo-${idx + 1}`,
-      url: imgUrl,
-      ext: "jpg",
-      vcodec: "none",
-      acodec: "none",
-      formatNote: cleanUrls.length > 1 ? `Photo ${idx + 1} · Item ${idx + 1}` : "Photo",
-      httpHeaders: { Referer: "https://www.instagram.com/" },
-    }));
-
-    const authorMatch = html.match(/class="UsernameText"[^>]*>([^<]+)</i);
-    const author = authorMatch ? authorMatch[1].trim() : "Instagram creator";
-
-    return {
-      id: shortcode,
-      title: "Instagram Photo",
-      uploader: author,
-      platform: "Instagram",
-      formats,
-      thumbnails: cleanUrls.map((u, i) => ({ url: u, id: `item-${i + 1}` })),
-      thumbnail: cleanUrls[0],
-    };
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export function parseFacebookHtml(html: string, originalUrl?: string): ExtractedMedia | null {

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 const nanoid = (len = 10) => randomBytes(Math.ceil(len * 0.75)).toString("base64url").slice(0, len);
-import { detectExtractorPlatform, extractWithYtDlp, parseFacebookHtml } from "../extractors/ytdlp";
+import { detectExtractorPlatform, extractWithYtDlp, parseFacebookHtml, isInstagramHtml, parseInstagramHtml } from "../extractors/ytdlp";
 import { extractYouTubeWithYtUltra } from "../extractors/youtube";
 import type { ExtractedMedia, ExtractedFormat } from "../extractors/types";
 import { createDownloadProxyUrl, createZipDownloadUrl } from "./downloadProxy";
@@ -137,6 +137,7 @@ export function isFacebookHtml(content: string): boolean {
 export function detectPlatform(sourceUrl: string) {
   if (!sourceUrl || typeof sourceUrl !== "string") return null;
   if (isFacebookHtml(sourceUrl)) return "Facebook";
+  if (isInstagramHtml(sourceUrl)) return "Instagram";
   let cleanUrl = sourceUrl.trim();
   if (cleanUrl.toLowerCase().startsWith("view-source:")) {
     cleanUrl = cleanUrl.replace(/^view-source:\s*/i, "").trim();
@@ -719,6 +720,20 @@ export async function resolveMedia(sourceUrl: string): Promise<MediaAnalysis> {
     return media;
   }
 
+  // Direct Instagram page source HTML extraction
+  if (isInstagramHtml(sourceUrl)) {
+    const rawHtml = sourceUrl.replace(/^view-source:\s*/i, "").trim();
+    const extracted = parseInstagramHtml(rawHtml);
+    if (!extracted || extracted.formats.length === 0) {
+      throw new Error(
+        "Could not find downloadable videos or photos in the provided Instagram page source. Ensure you copied the entire page source (Ctrl+A / Cmd+A) while viewing the reel or post."
+      );
+    }
+    const media = extractedToMedia("https://www.instagram.com/", extracted);
+    cacheMedia(media);
+    return media;
+  }
+
   let cleanUrl = sourceUrl.trim();
   if (cleanUrl.toLowerCase().startsWith("view-source:")) {
     cleanUrl = cleanUrl.replace(/^view-source:\s*/i, "").trim();
@@ -744,9 +759,14 @@ export async function resolveMedia(sourceUrl: string): Promise<MediaAnalysis> {
   // Social platform media extraction
   let extracted: ExtractedMedia | null = null;
   if (platform === "YouTube") {
-    extracted = await extractYouTubeWithYtUltra(cleanUrl);
-  }
-  if (!extracted) {
+    try {
+      extracted = await extractWithYtDlp(cleanUrl);
+    } catch (ytDlpError) {
+      console.warn("[resolveMedia] yt-dlp failed on YouTube, trying ytultra fallback:", ytDlpError);
+      extracted = await extractYouTubeWithYtUltra(cleanUrl);
+      if (!extracted) throw ytDlpError;
+    }
+  } else {
     extracted = await extractWithYtDlp(cleanUrl);
   }
   const media = extractedToMedia(cleanUrl, extracted);

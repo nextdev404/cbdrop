@@ -784,7 +784,7 @@ export function streamYouTubeWithYtDlp(
   const cookiesPath = getCookiesPath();
 
   const isAudio = container === "m4a" || container === "mp3";
-  const rawFormatId = formatId ? formatId.replace(/^extractor-/, "") : undefined;
+  const rawFormatId = formatId ? formatId.replace(/^extractor-/, "").replace(/-direct$/, "") : undefined;
 
   // Map DASH format IDs to HLS equivalents which are authorized and do not trigger 403
   const HLS_MAP: Record<string, string> = {
@@ -822,17 +822,17 @@ export function streamYouTubeWithYtDlp(
   if (isYouTube) {
     if (isAudio) {
       formatArg = rawFormatId
-        ? `${rawFormatId}/${HLS_AUDIO}`
-        : HLS_AUDIO;
+        ? `${rawFormatId}/${HLS_AUDIO}/ba/bestaudio/best`
+        : `${HLS_AUDIO}/ba/bestaudio/best`;
     } else if (rawFormatId) {
       const hlsId = HLS_MAP[rawFormatId];
       if (hlsId && hlsId !== rawFormatId) {
-        formatArg = `${hlsId}+${HLS_AUDIO}/${rawFormatId}+${HLS_AUDIO}/best`;
+        formatArg = `${hlsId}+${HLS_AUDIO}/${rawFormatId}+${HLS_AUDIO}/18/bv*+ba/b/best`;
       } else {
-        formatArg = `${rawFormatId}+${HLS_AUDIO}/best`;
+        formatArg = `${rawFormatId}+${HLS_AUDIO}/18/bv*+ba/b/best`;
       }
     } else {
-      formatArg = `270+${HLS_AUDIO}/232+${HLS_AUDIO}/best`;
+      formatArg = `270+${HLS_AUDIO}/232+${HLS_AUDIO}/18/bv*+ba/b/best`;
     }
   } else {
     // Non-YouTube platforms (TikTok, Instagram, Twitter/X, Facebook, Snapchat, etc.)
@@ -853,6 +853,10 @@ export function streamYouTubeWithYtDlp(
     "--js-runtimes", "node",
     "--remote-components", "ejs:github",
   ];
+
+  if (isYouTube) {
+    ytdlpArgs.push("--extractor-args", "youtube:player_client=android,web");
+  }
 
   if (cookiesPath) {
     ytdlpArgs.push("--cookies", cookiesPath);

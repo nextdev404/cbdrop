@@ -79,9 +79,9 @@
       "salt": "3d6e2e1cc38823e0bcf7149a090d1b5b",
       "role": "user",
       "plan": "pro",
-      "proExpiresAt": "2027-09-25T14:59:10.462Z",
+      "proExpiresAt": "2027-09-26T10:22:53.112Z",
       "createdAt": "2026-09-24T14:12:49.787Z",
-      "updatedAt": "2026-09-25T14:59:10.462Z",
+      "updatedAt": "2026-09-26T10:22:53.112Z",
       "lastSignedIn": "2026-09-24T14:12:49.788Z"
     },
     {
@@ -96,7 +96,7 @@
       "proExpiresAt": null,
       "createdAt": "2026-09-24T14:12:49.862Z",
       "updatedAt": "2026-09-24T14:12:49.862Z",
-      "lastSignedIn": "2026-09-25T14:59:10.531Z"
+      "lastSignedIn": "2026-09-26T10:22:53.188Z"
     }
   ],
   "sessions": [
@@ -177,9 +177,29 @@
       "userId": 7,
       "expiresAt": "2026-10-25T14:59:10.532Z",
       "createdAt": "2026-09-25T14:59:10.532Z"
+    },
+    {
+      "token": "4ade563f1cf324b36418b05401f6ecb39364069db164f94fd315f4dc544642f8",
+      "userId": 7,
+      "expiresAt": "2026-10-26T10:22:53.188Z",
+      "createdAt": "2026-09-26T10:22:53.188Z"
     }
   ],
   "history": [
+    {
+      "id": 18,
+      "userId": 7,
+      "mediaId": "test-auth-media",
+      "sourceUrl": "https://example.com/test",
+      "platform": "Test",
+      "title": "Test Download",
+      "creator": "Tester",
+      "quality": "1080p",
+      "container": "mp4",
+      "filename": "test.mp4",
+      "status": "completed",
+      "createdAt": "2026-09-26T10:22:53.191Z"
+    },
     {
       "id": 17,
       "userId": 7,
@@ -906,8 +926,52 @@
       "method": "crypto",
       "status": "completed",
       "createdAt": "2026-09-25T14:59:10.462Z"
+    },
+    {
+      "id": "pay_2086092a60eabb16",
+      "userId": 6,
+      "amount": 4.99,
+      "currency": "USD",
+      "plan": "pro",
+      "interval": "monthly",
+      "method": "card",
+      "status": "completed",
+      "createdAt": "2026-09-26T10:22:53.101Z"
+    },
+    {
+      "id": "pay_3869ec4553c10de0",
+      "userId": 6,
+      "amount": 14.5,
+      "currency": "USD",
+      "plan": "pro",
+      "interval": "yearly",
+      "method": "card",
+      "status": "completed",
+      "createdAt": "2026-09-26T10:22:53.111Z"
+    },
+    {
+      "id": "pay_110bca05da6c995e",
+      "userId": 6,
+      "amount": 4.99,
+      "currency": "USD",
+      "plan": "pro",
+      "interval": "monthly",
+      "method": "paypal",
+      "status": "completed",
+      "createdAt": "2026-09-26T10:22:53.111Z"
+    },
+    {
+      "id": "pay_b8dddc7fb0be1ac6",
+      "userId": 6,
+      "amount": 29,
+      "currency": "USD",
+      "plan": "pro",
+      "interval": "yearly",
+      "method": "crypto",
+      "status": "completed",
+      "createdAt": "2026-09-26T10:22:53.112Z"
     }
   ],
   "nextUserId": 8,
-  "nextHistoryId": 18
+  "nextHistoryId": 19
 }
