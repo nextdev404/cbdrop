@@ -847,9 +847,9 @@ export function streamYouTubeWithYtDlp(
           : `${HLS_AUDIO}/ba/bestaudio/best`;
       }
     } else if (container === "webm") {
-      formatArg = videoFormatId
-        ? `${videoFormatId}+251/${videoFormatId}+250/${videoFormatId}+ba[ext=webm]/bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/bv*+ba/best`
-        : `bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/bv*+ba/best`;
+      const hlsId = videoFormatId ? HLS_MAP[videoFormatId] : undefined;
+      const primaryVideo = hlsId || videoFormatId || "625";
+      formatArg = `${primaryVideo}+251/${primaryVideo}+${HLS_AUDIO}/${videoFormatId}+251/${videoFormatId}+${HLS_AUDIO}/bestvideo[ext=webm]+bestaudio[ext=webm]/bestvideo[vcodec^=vp9]+bestaudio/bv*+ba/b/best`;
     } else if (videoFormatId) {
       const hlsId = HLS_MAP[videoFormatId];
       if (hlsId && hlsId !== videoFormatId) {
@@ -963,8 +963,9 @@ export function streamYouTubeWithYtDlp(
       "-i", "pipe:0",
       "-c:v", "copy",
       "-c:a", "libopus",
+      "-ar", "48000",
       "-b:a", "128k",
-      "-f", "webm",
+      "-f", "matroska",
       "pipe:1",
     ];
   } else {
