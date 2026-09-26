@@ -674,8 +674,15 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
         onError: (mutationError) => {
           setStatus("failed");
           const msg = mutationError.message || "";
-          if (msg.includes("JSON") || msg.includes("Failed to execute") || msg.includes("fetch")) {
-            setError("Cannot connect to the backend server. The video downloader backend needs to be running to analyze links.");
+          const lower = msg.toLowerCase();
+          if (
+            lower.includes("json") ||
+            lower.includes("failed to execute") ||
+            lower.includes("fetch") ||
+            lower.includes("unexpected end") ||
+            lower.includes("network")
+          ) {
+            setError("The server is temporarily busy or reconnecting. Please wait a moment and try again.");
           } else {
             setError(msg || "We couldn't process this URL. Check the link and try again.");
           }
@@ -964,8 +971,9 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
       setUrl("");
       setError("");
       if (status === "failed") setStatus("idle");
+      inputRef.current?.focus();
     }}
-    className="hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-bold text-[#81838a] transition hover:bg-[#f0f0ed] hover:text-[#bd554c] dark:hover:bg-white/10 dark:hover:text-[#f2b4ad] sm:flex"
+    className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#f0f0ed] px-3 py-1.5 text-xs font-bold text-[#81838a] transition hover:bg-[#e4e5de] hover:text-[#bd554c] active:scale-95 dark:bg-white/10 dark:hover:bg-white/15 dark:hover:text-[#f2b4ad]"
     aria-label="Clear URL"
   >
     <X size={14} />Clear
@@ -986,11 +994,12 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
         })
         .catch(() => toast.info("Paste permission is unavailable"));
     }}
-    className="hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-bold text-[#81838a] transition hover:bg-[#f0f0ed] hover:text-[#5e5ce6] dark:hover:bg-white/10 dark:hover:text-[#d8ef54] sm:flex"
+    className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#f0f0ed] px-3 py-1.5 text-xs font-bold text-[#5e5ce6] transition hover:bg-[#e4e5de] hover:text-[#504ed1] active:scale-95 dark:bg-white/10 dark:text-[#d8ef54] dark:hover:bg-white/15"
     aria-label="Paste URL"
   >
     <Clipboard size={14} />Paste
   </button>
+
 )}</div><button type="submit" disabled={status === "analyzing" || status === "processing"} className="flex h-[52px] w-full items-center justify-center gap-2 rounded-[16px] bg-[#5e5ce6] px-6 text-sm font-black text-white shadow-[0_9px_20px_rgba(94,92,230,0.25)] transition hover:bg-[#504ed1] active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:absolute sm:bottom-2 sm:right-2 sm:top-2 sm:h-auto sm:w-auto">{status === "analyzing" ? <><Loader2 size={16} className="animate-spin" />Analyzing...</> : "Analyze URL"}<ChevronRight size={16} /></button></div>{error && <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-[#bd554c]"><CircleAlert size={15} />{error}</p>}</form><div className="mt-8 w-full max-w-[660px]">
   <div className="mb-3 flex items-center justify-center gap-2.5 lg:justify-start">
     <div className="h-px flex-1 bg-gradient-to-l from-[#e4e5de] to-transparent dark:from-white/10 lg:hidden" />

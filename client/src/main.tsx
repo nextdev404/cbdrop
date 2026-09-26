@@ -62,11 +62,59 @@ const trpcClient = trpc.createClient({
         }
         return {};
       },
-      fetch(input, init) {
-        return globalThis.fetch(input, {
-          ...(init ?? {}),
-          credentials: "include",
-        });
+      async fetch(input, init) {
+        try {
+          const res = await globalThis.fetch(input, {
+            ...(init ?? {}),
+            credentials: "include",
+          });
+          const contentType = res.headers.get("content-type") || "";
+          if (!contentType.includes("application/json")) {
+            const rawText = await res.text().catch(() => "");
+            let safeMsg = "The server is temporarily busy or reconnecting. Please wait a moment and try again.";
+            if (res.status === 429) {
+              safeMsg = "Too many requests. Please wait a moment and try again.";
+            } else if (res.status === 502 || res.status === 503 || res.status === 504) {
+              safeMsg = "The server took too long to respond or is restarting. Please try again shortly.";
+            } else if (rawText && rawText.length < 150 && !rawText.includes("<html") && !rawText.includes("<!DOCTYPE")) {
+              safeMsg = rawText.trim();
+            }
+            return new Response(
+              JSON.stringify([
+                {
+                  error: {
+                    json: {
+                      message: safeMsg,
+                      code: -32603,
+                    },
+                  },
+                },
+              ]),
+              {
+                status: res.status >= 400 ? res.status : 500,
+                headers: { "Content-Type": "application/json" },
+              }
+            );
+          }
+          return res;
+        } catch (err: unknown) {
+          return new Response(
+            JSON.stringify([
+              {
+                error: {
+                  json: {
+                    message: "Network connection lost. Please check your internet connection and try again.",
+                    code: -32603,
+                  },
+                },
+              },
+            ]),
+            {
+              status: 503,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
       },
     }),
   ],
