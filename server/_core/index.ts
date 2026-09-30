@@ -9,7 +9,31 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { registerDownloadProxy } from "../services/downloadProxy";
+import { registerDownloadProxy, startPeriodicCleanup } from "../services/downloadProxy";
+
+// Global process error guards to prevent client network disconnects,
+// stream aborts, or broken pipes from ever crashing the Node.js server.
+process.on("uncaughtException", (err) => {
+  const code = (err as any)?.code;
+  const msg = err?.message || "";
+  if (
+    code === "ERR_STREAM_PREMATURE_CLOSE" ||
+    code === "ECONNRESET" ||
+    code === "EPIPE" ||
+    code === "ECANCELED" ||
+    msg.includes("premature close") ||
+    msg.includes("aborted") ||
+    msg.includes("write after end")
+  ) {
+    // Normal client cancellation / stream drop: ignore to stay running
+    return;
+  }
+  console.error("[CRITICAL] Uncaught exception:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.warn("[WARNING] Unhandled promise rejection:", reason);
+});
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -22,6 +46,19 @@ function isPortAvailable(port: number): Promise<boolean> {
 }
 
 async function findAvailablePort(startPort: number = 3000): Promise<number> {
+  // In production, we MUST bind to the specified port (e.g. 3000) because Nginx / Reverse Proxy
+  // forwards traffic strictly to that port. Silently jumping to 3001 triggers 502 Bad Gateway.
+  if (process.env.NODE_ENV === "production") {
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      if (await isPortAvailable(startPort)) {
+        return startPort;
+      }
+      console.warn(`[PORT] Port ${startPort} is busy or releasing, retrying in 1s... (${attempt}/10)`);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return startPort;
+  }
+
   for (let port = startPort; port < startPort + 20; port++) {
     if (await isPortAvailable(port)) {
       return port;
@@ -47,6 +84,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerDownloadProxy(app);
+  startPeriodicCleanup();
   registerOAuthRoutes(app);
   registerGoogleAuthRoutes(app);
 

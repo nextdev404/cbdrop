@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="bg192" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1b1d28" />
+      <stop offset="50%" stop-color="#11131a" />
+      <stop offset="100%" stop-color="#0a0b10" />
+    </linearGradient>
+    <linearGradient id="pGrad192" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7a78ff" />
+      <stop offset="100%" stop-color="#5e5ce6" />
+    </linearGradient>
+    <linearGradient id="aGrad192" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e2fa5c" />
+      <stop offset="100%" stop-color="#b4d816" />
+    </linearGradient>
+  </defs>
+
+  <rect width="192" height="192" rx="42" fill="url(#bg192)" />
+  <rect width="190" height="190" x="1" y="1" rx="41" fill="none" stroke="url(#pGrad192)" stroke-width="1.5" opacity="0.35" />
+
+  <!-- Base tray -->
+  <path d="M54 128 H138 A6 6 0 0 1 144 134 V136 A6 6 0 0 1 138 142 H54 A6 6 0 0 1 48 136 V134 A6 6 0 0 1 54 128 Z" fill="url(#aGrad192)" />
+
+  <!-- Arrow -->
+  <path d="M85 52 H107 A5 5 0 0 1 112 57 V94 H127 A5 5 0 0 1 131 103 L100 133 A5 5 0 0 1 92 133 L61 103 A5 5 0 0 1 65 94 H80 V57 A5 5 0 0 1 85 52 Z" fill="url(#pGrad192)" />
+</svg>

@@ -26,6 +26,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import {
+  clearInProgressDownloads,
   createDownloadProxyUrl,
   decodeToken,
   registerDownloadProxy,
@@ -90,6 +91,7 @@ function getDownloadHandler() {
 describe("YouTube video and audio pipeline verification", () => {
   beforeEach(() => {
     spawnCalls.length = 0;
+    clearInProgressDownloads();
   });
 
   afterEach(() => {
@@ -106,8 +108,8 @@ describe("YouTube video and audio pipeline verification", () => {
       "mp4"
     );
 
-    expect(spawnCalls.length).toBe(2);
-    const [ytdlpCall, ffmpegCall] = spawnCalls;
+    expect(spawnCalls.length).toBe(1);
+    const [ytdlpCall] = spawnCalls;
 
     const fIdx = ytdlpCall.args.indexOf("-f");
     expect(fIdx).toBeGreaterThanOrEqual(0);
@@ -117,14 +119,10 @@ describe("YouTube video and audio pipeline verification", () => {
     expect(formatArg).not.toContain("/18/");
     expect(formatArg).toContain("[height<=1080]");
 
-    // ffmpeg converts/muxes video into MP4 with default_base_moof for Finder QuickLook compatibility
-    expect(ffmpegCall.args).toContain("-c:v");
-    expect(ffmpegCall.args).toContain("copy");
-    expect(ffmpegCall.args).toContain("-c:a");
-    expect(ffmpegCall.args).toContain("aac");
-    const movflagsIdx = ffmpegCall.args.indexOf("-movflags");
-    expect(movflagsIdx).toBeGreaterThanOrEqual(0);
-    expect(ffmpegCall.args[movflagsIdx + 1]).toContain("default_base_moof");
+    // yt-dlp merges video and audio into MP4 on disk using ffmpeg
+    expect(ytdlpCall.args).toContain("--ffmpeg-location");
+    expect(ytdlpCall.args).toContain("--merge-output-format");
+    expect(ytdlpCall.args).toContain("mp4");
   });
 
   it("verifies 720p MP4 YouTube downloads route to yt-dlp with authorized HLS format '232'", () => {
@@ -137,8 +135,8 @@ describe("YouTube video and audio pipeline verification", () => {
       "mp4"
     );
 
-    expect(spawnCalls.length).toBe(2);
-    const [ytdlpCall, ffmpegCall] = spawnCalls;
+    expect(spawnCalls.length).toBe(1);
+    const [ytdlpCall] = spawnCalls;
 
     const fIdx = ytdlpCall.args.indexOf("-f");
     expect(fIdx).toBeGreaterThanOrEqual(0);
@@ -147,9 +145,9 @@ describe("YouTube video and audio pipeline verification", () => {
     expect(formatArg).toContain("136+");
     expect(formatArg).not.toContain("/18/");
     expect(formatArg).toContain("[height<=720]");
-    const movflagsIdx = ffmpegCall.args.indexOf("-movflags");
-    expect(movflagsIdx).toBeGreaterThanOrEqual(0);
-    expect(ffmpegCall.args[movflagsIdx + 1]).toContain("default_base_moof");
+    expect(ytdlpCall.args).toContain("--ffmpeg-location");
+    expect(ytdlpCall.args).toContain("--merge-output-format");
+    expect(ytdlpCall.args).toContain("mp4");
   });
 
   it("verifies additional resolutions (480p, 360p, 240p, 144p, 1440p, 4K) map to their HLS equivalents", () => {
@@ -159,12 +157,13 @@ describe("YouTube video and audio pipeline verification", () => {
       "133": "229", // 240p
       "160": "269", // 144p
       "400": "620", // 1440p
-      "401": "625", // 4K
+      "401": "625", // 4K MP4
       "313": "625", // 4K webm
     };
 
     for (const [dashId, expectedHlsId] of Object.entries(testCases)) {
       spawnCalls.length = 0;
+      clearInProgressDownloads();
       const mockRes = createMockResponse();
       streamYouTubeWithYtDlp(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -193,16 +192,18 @@ describe("YouTube video and audio pipeline verification", () => {
       "m4a"
     );
 
-    expect(spawnCalls.length).toBe(2);
-    const [ytdlpM4a, ffmpegM4a] = spawnCalls;
+    expect(spawnCalls.length).toBe(1);
+    const [ytdlpM4a] = spawnCalls;
     const fIdxM4a = ytdlpM4a.args.indexOf("-f");
     expect(ytdlpM4a.args[fIdxM4a + 1]).toContain("234");
     expect(ytdlpM4a.args[fIdxM4a + 1]).toContain("140");
-    expect(ffmpegM4a.args).toContain("aac");
-    expect(ffmpegM4a.args).toContain("-vn");
+    expect(ytdlpM4a.args).toContain("-x");
+    expect(ytdlpM4a.args).toContain("--audio-format");
+    expect(ytdlpM4a.args).toContain("m4a");
 
     // 2. MP3
     spawnCalls.length = 0;
+    clearInProgressDownloads();
     const mockResMp3 = createMockResponse();
     streamYouTubeWithYtDlp(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -212,18 +213,20 @@ describe("YouTube video and audio pipeline verification", () => {
       "mp3"
     );
 
-    expect(spawnCalls.length).toBe(2);
-    const [ytdlpMp3, ffmpegMp3] = spawnCalls;
+    expect(spawnCalls.length).toBe(1);
+    const [ytdlpMp3] = spawnCalls;
     const fIdxMp3 = ytdlpMp3.args.indexOf("-f");
     expect(ytdlpMp3.args[fIdxMp3 + 1]).toContain("234");
-    expect(ffmpegMp3.args).toContain("libmp3lame");
-    expect(ffmpegMp3.args).toContain("-vn");
+    expect(ytdlpMp3.args).toContain("-x");
+    expect(ytdlpMp3.args).toContain("--audio-format");
+    expect(ytdlpMp3.args).toContain("mp3");
   });
 
   it("verifies endpoint routing: YouTube video and audio route to streamYouTubeWithYtDlp, while image downloads bypass to HTTP proxy", async () => {
     const handler = getDownloadHandler();
 
     // 1. YouTube video
+    clearInProgressDownloads();
     const ytVideoToken = createDownloadProxyUrl(
       "https://rr1---sn-video.googlevideo.com/v.mp4",
       "cbdrop-video.mp4",
@@ -239,12 +242,13 @@ describe("YouTube video and audio pipeline verification", () => {
     const resVideo = createMockResponse();
     await handler(reqVideo, resVideo as unknown as Response);
 
-    expect(spawnCalls.length).toBe(2); // yt-dlp + ffmpeg
+    expect(spawnCalls.length).toBe(1); // yt-dlp disk merging
     expect(spawnCalls[0].args).toContain("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
     expect(spawnCalls[0].args.join(" ")).toContain("270+");
 
     // 2. YouTube audio
     spawnCalls.length = 0;
+    clearInProgressDownloads();
     const ytAudioToken = createDownloadProxyUrl(
       "https://rr1---sn-audio.googlevideo.com/a.m4a",
       "cbdrop-audio.m4a",
@@ -260,9 +264,9 @@ describe("YouTube video and audio pipeline verification", () => {
     const resAudio = createMockResponse();
     await handler(reqAudio, resAudio as unknown as Response);
 
-    expect(spawnCalls.length).toBe(2);
+    expect(spawnCalls.length).toBe(1);
     expect(spawnCalls[0].args).toContain("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-    expect(spawnCalls[1].args).toContain("aac");
+    expect(spawnCalls[0].args).toContain("m4a");
 
     // 3. YouTube cover image (must NOT route to streamYouTubeWithYtDlp!)
     spawnCalls.length = 0;

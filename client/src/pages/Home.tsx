@@ -21,10 +21,12 @@ import {
   Download,
   FileAudio,
   FileVideo,
+  FolderArchive,
   ImageIcon,
   Images,
   Info,
   Link2,
+  ListVideo,
   Loader2,
   LogOut,
   Maximize2,
@@ -40,6 +42,8 @@ import {
   Zap,
 } from "lucide-react";
 import { ALL_SEO_TOOLS, type SeoToolPreset } from "@/lib/seoPresets";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { LanguageSelector } from "@/components/LanguageSelector";
 
 function PlatformIcon({ name, size = 14 }: { name: string; size?: number }) {
   switch (name) {
@@ -144,6 +148,14 @@ type Format = {
   isOriginal?: boolean;
 };
 
+type PlaylistItem = {
+  id: string;
+  title: string;
+  url: string;
+  duration?: string;
+  thumbnailUrl?: string;
+};
+
 type MediaResult = {
   id: string;
   platform: string;
@@ -152,6 +164,8 @@ type MediaResult = {
   duration: string;
   thumbnailUrl?: string;
   ready?: boolean;
+  isPlaylist?: boolean;
+  playlistItems?: PlaylistItem[];
   formats: Format[];
 };
 
@@ -203,7 +217,7 @@ function PreviewCard() {
   return <div className="relative mx-auto w-full max-w-[500px] animate-[float_7s_ease-in-out_infinite]">
     <div className="absolute -right-2 top-10 hidden rounded-2xl border border-[#e4e5dc] bg-white px-4 py-3 shadow-[0_20px_60px_rgba(17,18,24,0.12)] sm:block lg:-right-4 dark:border-white/10 dark:bg-[#1a1c22]"><div className="flex items-center gap-2 text-xs font-bold text-[#454751] dark:text-[#d9dbe3]"><span className="flex size-6 items-center justify-center rounded-full bg-[#eaf5a4] text-[#4d5b13]"><Check size={13} strokeWidth={3} /></span>Ready in seconds</div></div>
     <div className="absolute -left-2 bottom-8 hidden rounded-2xl border border-[#e4e5dc] bg-white px-4 py-3 shadow-[0_20px_60px_rgba(17,18,24,0.12)] sm:block lg:-left-4 dark:border-white/10 dark:bg-[#1a1c22]"><div className="flex items-center gap-2 text-xs font-bold text-[#454751] dark:text-[#d9dbe3]"><span className="flex size-6 items-center justify-center rounded-full bg-[#ecebff] text-[#5e5ce6]"><ShieldCheck size={13} /></span>Permission-first by design</div></div>
-    <div className="overflow-hidden rounded-[30px] border border-[#dfe1d8] bg-white p-3 shadow-[0_30px_80px_rgba(34,36,51,0.15)] dark:border-white/10 dark:bg-[#1a1c22]"><div className="relative overflow-hidden rounded-[22px] bg-[#111318] p-5 text-white sm:p-7"><div className="absolute -right-10 -top-16 size-56 rounded-full bg-[#5e5ce6]/40 blur-3xl" /><div className="absolute -bottom-24 left-8 size-48 rounded-full bg-[#d8ef54]/25 blur-3xl" /><div className="relative flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.18em] text-white/55"><span className="flex items-center gap-2"><span className="size-2 rounded-full bg-[#d8ef54]" />media passport</span><span>01 / 03</span></div><div className="relative mt-14 sm:mt-16 flex items-end justify-between gap-4"><div><p className="text-xs font-medium text-white/55">ANALYZED FROM</p><p className="mt-2 text-2xl font-semibold tracking-[-0.05em]">one link</p></div><div className="flex size-14 sm:size-16 items-center justify-center rounded-[20px] bg-[#5e5ce6] shadow-[0_15px_30px_rgba(94,92,230,0.4)]"><Play size={25} fill="currentColor" strokeWidth={1.5} /></div></div><div className="relative mt-8 grid grid-cols-3 gap-2 border-t border-white/10 pt-4 text-[11px]"><div><p className="text-white/45">FORMAT</p><p className="mt-1 font-bold">MP4</p></div><div><p className="text-white/45">QUALITY</p><p className="mt-1 font-bold">720p</p></div><div><p className="text-white/45">STATUS</p><p className="mt-1 font-bold text-[#d8ef54]">AVAILABLE</p></div></div></div><div className="flex items-center justify-between gap-3 px-2 pb-1 pt-4 sm:px-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full bg-[#f0f0ed] text-[#5e5ce6] dark:bg-white/10"><Link2 size={15} /></span><span className="text-xs font-semibold text-[#676a73] dark:text-[#b8bbc6]">cbdrop / analyze</span></div><span className="flex items-center gap-1.5 text-xs font-bold text-[#5e5ce6]"><Zap size={13} fill="currentColor" />instant</span></div></div>
+    <div className="overflow-hidden rounded-[30px] border border-[#dfe1d8] bg-white p-3 shadow-[0_30px_80px_rgba(34,36,51,0.15)] dark:border-white/10 dark:bg-[#1a1c22]"><div className="relative overflow-hidden rounded-[22px] bg-[#111318] p-5 text-white sm:p-7"><div className="absolute -right-10 -top-16 size-56 rounded-full bg-[#5e5ce6]/40 blur-3xl" /><div className="absolute -bottom-24 left-8 size-48 rounded-full bg-[#d8ef54]/25 blur-3xl" /><div className="relative flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.18em] text-white/55"><span className="flex items-center gap-2"><span className="size-2 rounded-full bg-[#d8ef54]" />media passport</span><span>01 / 03</span></div><div className="relative mt-14 sm:mt-16 flex items-end justify-between gap-4"><div><p className="text-xs font-medium text-white/55">ANALYZED FROM</p><p className="mt-2 text-2xl font-semibold tracking-[-0.05em]">one link</p></div><div className="flex size-14 sm:size-16 items-center justify-center rounded-[20px] bg-[#5e5ce6] shadow-[0_15px_30px_rgba(94,92,230,0.4)]"><Play size={25} fill="currentColor" strokeWidth={1.5} /></div></div><div className="relative mt-8 grid grid-cols-3 gap-2 border-t border-white/10 pt-4 text-[11px]"><div><p className="text-white/45">FORMAT</p><p className="mt-1 font-bold">MP4</p></div><div><p className="text-white/45">QUALITY</p><p className="mt-1 font-bold">4K</p></div><div><p className="text-white/45">STATUS</p><p className="mt-1 font-bold text-[#d8ef54]">AVAILABLE</p></div></div></div><div className="flex items-center justify-between gap-3 px-2 pb-1 pt-4 sm:px-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full bg-[#f0f0ed] text-[#5e5ce6] dark:bg-white/10"><Link2 size={15} /></span><span className="text-xs font-semibold text-[#676a73] dark:text-[#b8bbc6]">cbdrop / analyze</span></div><span className="flex items-center gap-1.5 text-xs font-bold text-[#5e5ce6]"><Zap size={13} fill="currentColor" />instant</span></div></div>
   </div>;
 }
 
@@ -314,19 +328,6 @@ function ImageCard({
   );
 }
 
-interface ActiveDownload {
-  token: string;
-  downloadUrl: string;
-  filename: string;
-  quality: string;
-  container: string;
-  status: "idle" | "preparing" | "downloading" | "resuming" | "interrupted" | "completed" | "error";
-  downloadedBytes: number;
-  totalBytes: number;
-  speed: number;
-  eta: number;
-  error?: string;
-}
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0 || isNaN(bytes)) return "0 B";
@@ -354,6 +355,7 @@ function formatETA(seconds: number): string {
 }
 
 export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
+  const { t, lang, isRtl } = useLanguage();
   const [url, setUrl] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
@@ -410,8 +412,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
   }, []);
 
   function isFormatPro(format: Format) {
-    const q = format.quality.toLowerCase();
-    return q.includes("4k") || q.includes("2160") || q.includes("1440") || q.includes("1080p60") || q.includes("320");
+    return false;
   }
   const [media, setMedia] = useState<MediaResult | null>(null);
   const [selectedFormat, setSelectedFormat] = useState("");
@@ -422,49 +423,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
   const [isZipping, setIsZipping] = useState(false);
   const [visibleCount, setVisibleCount] = useState(4);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-  const [activeDownload, setActiveDownload] = useState<ActiveDownload | null>(null);
 
-  useEffect(() => {
-    if (!activeDownload || activeDownload.status === "completed" || activeDownload.status === "error") {
-      return;
-    }
-    const token = activeDownload.token;
-    let isMounted = true;
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/download-progress/${token}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!isMounted) return;
-
-        setActiveDownload((prev) => {
-          if (!prev || prev.token !== token) return prev;
-          if (data.status && data.status !== "idle") {
-            return {
-              ...prev,
-              status: data.status,
-              downloadedBytes: data.downloadedBytes ?? prev.downloadedBytes,
-              totalBytes: data.totalBytes > 0 ? data.totalBytes : prev.totalBytes,
-              speed: data.speed ?? prev.speed,
-              eta: data.eta ?? prev.eta,
-              error: data.error,
-            };
-          }
-          return prev;
-        });
-
-        if (data.status === "completed") {
-          clearInterval(pollInterval);
-        }
-      } catch {}
-    }, 500);
-
-    return () => {
-      isMounted = false;
-      clearInterval(pollInterval);
-    };
-  }, [activeDownload?.token, activeDownload?.status]);
 
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledMediaIdRef = useRef<string | null>(null);
@@ -511,23 +470,24 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     }
   }
 
+  const isPlaylist = Boolean(media?.isPlaylist && media?.playlistItems && media.playlistItems.length > 0);
   const imageFormats = useMemo(() => media?.formats.filter((f) => f.type === "image") ?? [], [media]);
   const audioFormats = useMemo(() => media?.formats.filter((f) => f.type === "audio") ?? [], [media]);
   const videoFormats = useMemo(() => media?.formats.filter((f) => f.type === "video") ?? [], [media]);
-  const hasVideo = videoFormats.length > 0;
-  const isSingleImage = !hasVideo && imageFormats.length === 1;
-  const isMultiImage = !hasVideo && imageFormats.length > 1;
+  const hasVideo = !isPlaylist && videoFormats.length > 0;
+  const isSingleImage = !isPlaylist && !hasVideo && imageFormats.length === 1;
+  const isMultiImage = !isPlaylist && !hasVideo && imageFormats.length > 1;
 
   const availableCategories = useMemo(() => {
     if (!media) return [];
     const cats: { id: "all" | "video" | "audio" | "image"; label: string; count: number }[] = [
-      { id: "all", label: "All", count: media.formats.length },
+      { id: "all", label: t.tabs.all, count: media.formats.length },
     ];
-    if (videoFormats.length > 0) cats.push({ id: "video", label: "Video", count: videoFormats.length });
-    if (audioFormats.length > 0) cats.push({ id: "audio", label: "Audio", count: audioFormats.length });
-    if (imageFormats.length > 0) cats.push({ id: "image", label: "Images", count: imageFormats.length });
+    if (videoFormats.length > 0) cats.push({ id: "video", label: t.tabs.video, count: videoFormats.length });
+    if (audioFormats.length > 0) cats.push({ id: "audio", label: t.tabs.audio, count: audioFormats.length });
+    if (imageFormats.length > 0) cats.push({ id: "image", label: t.tabs.image, count: imageFormats.length });
     return cats;
-  }, [media, videoFormats, audioFormats, imageFormats]);
+  }, [media, videoFormats, audioFormats, imageFormats, t]);
 
   const filteredFormats = useMemo(() => {
     if (!media) return [];
@@ -561,22 +521,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
         const isMulti = imageFormats.length > 1;
         const defaultName = format.type === "audio" ? `audio.${format.container}` : (isMulti ? `image-${index + 1}.${format.container}` : `image.${format.container}`);
         const filename = result.filename || defaultName;
-        const tokenMatch = result.downloadUrl.match(/\/api\/download\/([^/?#]+)/);
-        const token = tokenMatch ? tokenMatch[1] : undefined;
-        if (token) {
-          setActiveDownload({
-            token,
-            downloadUrl: result.downloadUrl,
-            filename,
-            quality: format.quality,
-            container: format.container.toUpperCase(),
-            status: "downloading",
-            downloadedBytes: 0,
-            totalBytes: format.filesize || 0,
-            speed: 0,
-            eta: 0,
-          });
-        }
         triggerFileDownload(result.downloadUrl, filename);
         toast.success(format.type === "audio" ? "Audio track downloaded" : (isMulti ? `Image ${index + 1} downloaded` : "Image downloaded"));
       } else {
@@ -590,9 +534,10 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
   }
 
   async function handleDownloadAll() {
-    if (!media || !imageFormats.length) return;
+    if (!media) return;
+    if (!isPlaylist && !imageFormats.length) return;
 
-    // Option A (Preferred): Package all images into a single ZIP file
+    // Option A (Preferred): Package all images or playlist items into a single ZIP file
     setIsZipping(true);
     try {
       const zipResult = await createZipJob.mutateAsync({
@@ -600,44 +545,48 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
         sourceUrl: url.trim(),
       });
       if (zipResult.downloadUrl) {
-        triggerFileDownload(zipResult.downloadUrl, zipResult.filename || "cbdrop-images.zip");
-        toast.success(`Downloading all ${imageFormats.length} images as ZIP archive`);
+        const defaultZipName = isPlaylist ? "cbdrop-playlist.zip" : "cbdrop-images.zip";
+        triggerFileDownload(zipResult.downloadUrl, zipResult.filename || defaultZipName);
+        toast.success(isPlaylist ? t.playlist.zipReady : `Downloading all ${imageFormats.length} images as ZIP archive`);
         setIsZipping(false);
         return;
       }
     } catch (err) {
-      console.warn("ZIP packaging failed, proceeding with sequential download fallback:", err);
+      console.warn("ZIP packaging failed, proceeding with fallback if available:", err);
+      toast.error(err instanceof Error ? err.message : "ZIP packaging failed");
     } finally {
       setIsZipping(false);
     }
 
-    // Option B: Sequential downloads with progress indicator
-    setDownloadAllProgress({ current: 0, total: imageFormats.length });
-    let count = 0;
+    if (!isPlaylist && imageFormats.length > 0) {
+      // Option B: Sequential downloads with progress indicator for photos
+      setDownloadAllProgress({ current: 0, total: imageFormats.length });
+      let count = 0;
 
-    for (let i = 0; i < imageFormats.length; i++) {
-      const format = imageFormats[i];
-      try {
-        const result = await createJob.mutateAsync({
-          mediaId: media.id,
-          formatId: format.id,
-          sourceUrl: url.trim(),
-        });
-        if (result.downloadUrl) {
-          const filename = result.filename || `image-${i + 1}.${format.container}`;
-          triggerFileDownload(result.downloadUrl, filename);
-          count++;
-          setDownloadAllProgress({ current: count, total: imageFormats.length });
+      for (let i = 0; i < imageFormats.length; i++) {
+        const format = imageFormats[i];
+        try {
+          const result = await createJob.mutateAsync({
+            mediaId: media.id,
+            formatId: format.id,
+            sourceUrl: url.trim(),
+          });
+          if (result.downloadUrl) {
+            const filename = result.filename || `image-${i + 1}.${format.container}`;
+            triggerFileDownload(result.downloadUrl, filename);
+            count++;
+            setDownloadAllProgress({ current: count, total: imageFormats.length });
+          }
+        } catch {
+          // continue with next image, do not abort
         }
-      } catch {
-        // continue with next image, do not abort
+        if (i < imageFormats.length - 1) {
+          await new Promise((r) => setTimeout(r, 400));
+        }
       }
-      if (i < imageFormats.length - 1) {
-        await new Promise((r) => setTimeout(r, 400));
-      }
+      setDownloadAllProgress(null);
+      toast.success(`Downloaded ${count} of ${imageFormats.length} images`);
     }
-    setDownloadAllProgress(null);
-    toast.success(`Downloaded ${count} of ${imageFormats.length} images`);
   }
 
   useEffect(() => {
@@ -695,16 +644,54 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     }
   }, [media, status]);
 
+  function normalizeInputUrl(input: string): string {
+    try {
+      let clean = input.trim().replace(/^["']|["']$/g, "");
+      if (clean.toLowerCase().startsWith("view-source:")) {
+        clean = clean.replace(/^view-source:\s*/i, "").trim();
+      }
+      const parsed = new URL(clean);
+      const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+      if (host === "youtu.be") {
+        const videoId = parsed.pathname.slice(1).split("/")[0].split("?")[0];
+        if (videoId && videoId.length >= 6) {
+          return `https://www.youtube.com/watch?v=${videoId}`;
+        }
+      }
+      if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+        const shortsMatch = parsed.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
+        if (shortsMatch) {
+          return `https://www.youtube.com/watch?v=${shortsMatch[1]}`;
+        }
+        const embedMatch = parsed.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+        if (embedMatch) {
+          return `https://www.youtube.com/watch?v=${embedMatch[1]}`;
+        }
+        const liveMatch = parsed.pathname.match(/\/live\/([a-zA-Z0-9_-]{6,})/);
+        if (liveMatch) {
+          return `https://www.youtube.com/watch?v=${liveMatch[1]}`;
+        }
+        const v = parsed.searchParams.get("v");
+        if (v) {
+          return `https://www.youtube.com/watch?v=${v}`;
+        }
+      }
+      return clean;
+    } catch {
+      return input.trim().replace(/^["']|["']$/g, "");
+    }
+  }
+
   function handleAnalyzeWithUrl(targetText: string) {
-    const trimmed = targetText.trim();
+    const trimmed = normalizeInputUrl(targetText);
     if (!trimmed) {
       setStatus("failed");
       setError("Paste a YouTube, TikTok, Instagram, Facebook, Snapchat, or X URL to get started.");
       return;
     }
+    setUrl(trimmed);
     setError("");
     setJob(null);
-    setActiveDownload(null);
     lastScrolledMediaIdRef.current = null;
     setStatus("analyzing");
 
@@ -738,7 +725,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
   }
 
   function triggerAutoAnalyze(pastedText: string) {
-    const clean = pastedText.trim().replace(/^["']|["']$/g, "");
+    const clean = normalizeInputUrl(pastedText);
     if (!clean) return;
     setUrl(clean);
     handleAnalyzeWithUrl(clean);
@@ -799,22 +786,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
             description: `${selected.container.toUpperCase()} · ${selected.quality} · ${selected.size}`,
           });
           if (result.status === "completed" && result.downloadUrl) {
-            const tokenMatch = result.downloadUrl.match(/\/api\/download\/([^/?#]+)/);
-            const token = tokenMatch ? tokenMatch[1] : undefined;
-            if (token) {
-              setActiveDownload({
-                token,
-                downloadUrl: result.downloadUrl,
-                filename: result.filename,
-                quality: selected.quality,
-                container: selected.container.toUpperCase(),
-                status: "downloading",
-                downloadedBytes: 0,
-                totalBytes: selected.filesize || 0,
-                speed: 0,
-                eta: 0,
-              });
-            }
             triggerFileDownload(result.downloadUrl, result.filename);
           }
         },
@@ -834,22 +805,6 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     }
     if (job.downloadUrl) {
       const filename = job.filename || (selected.type === "image" ? "image.jpg" : "video.mp4");
-      const tokenMatch = job.downloadUrl.match(/\/api\/download\/([^/?#]+)/);
-      const token = tokenMatch ? tokenMatch[1] : undefined;
-      if (token) {
-        setActiveDownload({
-          token,
-          downloadUrl: job.downloadUrl,
-          filename,
-          quality: selected.quality,
-          container: selected.container.toUpperCase(),
-          status: "downloading",
-          downloadedBytes: 0,
-          totalBytes: selected.filesize || 0,
-          speed: 0,
-          eta: 0,
-        });
-      }
       triggerFileDownload(job.downloadUrl, filename);
       return;
     }
@@ -863,7 +818,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     URL.revokeObjectURL(link.href);
   }
 
-  function resetAnalyzer() { lastScrolledMediaIdRef.current = null; setStatus("idle"); setMedia(null); setJob(null); setActiveDownload(null); setError(""); setSelectedFormat(""); setFormatCategory("all"); setVisibleCount(4); }
+  function resetAnalyzer() { lastScrolledMediaIdRef.current = null; setStatus("idle"); setMedia(null); setJob(null); setError(""); setSelectedFormat(""); setFormatCategory("all"); setVisibleCount(4); }
 
   return <div className="min-h-screen overflow-x-hidden bg-[#f7f7f2] text-[#111318] transition-colors duration-200 dark:bg-[#111318] dark:text-[#f7f7f2]">
     <div className="pointer-events-none fixed inset-0 opacity-[0.035] [background-image:url('data:image/svg+xml,%3Csvg viewBox=\'0 0 160 160\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'.9\' numOctaves=\'3\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\' opacity=\'.7\'/%3E%3C/svg%3E')]" />
@@ -883,7 +838,15 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
             loading="eager"
           />
         </a>
-        <nav className="hidden items-center gap-8 text-sm font-semibold text-[#686b75] md:flex dark:text-[#b7bac6]"><a className="transition-colors hover:text-[#5e5ce6]" href="#tools">Free Tools</a><a className="transition-colors hover:text-[#5e5ce6]" href="#how-it-works">How it works</a><a className="transition-colors hover:text-[#5e5ce6]" href="#platforms">Supported platforms</a><a className="transition-colors hover:text-[#5e5ce6]" href="#faq">FAQ</a></nav><div className="hidden items-center gap-3 md:flex"><button aria-label="Toggle theme" className="flex size-10 items-center justify-center rounded-full border border-[#e1e2da] text-[#6a6c75] transition hover:border-[#5e5ce6] hover:text-[#5e5ce6] dark:border-white/10 dark:text-[#b7bac6]" onClick={() => toggleTheme?.()}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button>{isPro ? (
+        <nav className="hidden items-center gap-8 text-sm font-semibold text-[#686b75] md:flex dark:text-[#b7bac6]">
+          <a className="transition-colors hover:text-[#5e5ce6]" href="#tools">{t.nav.tools}</a>
+          <a className="transition-colors hover:text-[#5e5ce6]" href="#how-it-works">{t.nav.howItWorks}</a>
+          <a className="transition-colors hover:text-[#5e5ce6]" href="#platforms">{t.nav.platforms}</a>
+          <a className="transition-colors hover:text-[#5e5ce6]" href="#faq">{t.nav.faq}</a>
+        </nav>
+        <div className="hidden items-center gap-2.5 md:flex">
+          <LanguageSelector />
+          <button aria-label="Toggle theme" className="flex size-10 items-center justify-center rounded-full border border-[#e1e2da] text-[#6a6c75] transition hover:border-[#5e5ce6] hover:text-[#5e5ce6] dark:border-white/10 dark:text-[#b7bac6]" onClick={() => toggleTheme?.()}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button>{isPro ? (
   <button
     type="button"
     onClick={openUpgradeModal}
@@ -899,7 +862,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     className="group inline-flex items-center gap-1.5 rounded-full border border-[#5e5ce6]/40 bg-[#5e5ce6]/10 px-3.5 py-1.5 text-xs font-black text-[#5e5ce6] transition hover:bg-[#5e5ce6] hover:text-white dark:border-[#d8ef54]/40 dark:bg-[#d8ef54]/10 dark:text-[#d8ef54] dark:hover:bg-[#d8ef54] dark:hover:text-[#111318]"
   >
     <Crown size={14} />
-    <span>Upgrade</span>
+    <span>{t.nav.upgrade}</span>
   </button>
 )}{user ? (
   <div className="flex items-center gap-2">
@@ -910,12 +873,12 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
       <span className="flex size-5 items-center justify-center rounded-full bg-[#5e5ce6] text-[10px] font-black text-white">
         {user.name ? user.name[0].toUpperCase() : "U"}
       </span>
-      <span>{user.name ? user.name.split(" ")[0] : "Account"}</span>
+      <span>{user.name ? user.name.split(" ")[0] : t.nav.account}</span>
     </a>
     <button
       type="button"
       onClick={() => logout()}
-      title="Sign out"
+      title={t.nav.signOut}
       className="flex size-8 items-center justify-center rounded-full border border-[#dedfd8] bg-white text-xs font-bold text-[#767882] transition hover:text-[#bd554c] dark:border-white/10 dark:bg-white/5"
     >
       <LogOut size={13} />
@@ -927,9 +890,9 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     onClick={openAuthModal}
     className="group inline-flex items-center gap-2 rounded-full bg-[#111318] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#5e5ce6] active:scale-[0.97] dark:bg-white dark:text-[#111318] dark:hover:bg-[#d8ef54]"
   >
-    Sign in <ArrowUpRight size={15} />
+    {t.nav.signIn} <ArrowUpRight size={15} />
   </button>
-)}</div><button className="flex size-10 items-center justify-center rounded-full border border-[#e1e2da] md:hidden dark:border-white/10" aria-label="Open navigation" onClick={() => setMobileOpen((value) => !value)}>{mobileOpen ? <X size={19} /> : <Menu size={19} />}</button></div>{mobileOpen && <div className="container border-t border-[#e4e5de] py-4 md:hidden dark:border-white/10"><div className="flex flex-col gap-4 text-sm font-semibold text-[#686b75] dark:text-[#b7bac6]"><a href="#tools" onClick={() => setMobileOpen(false)}>Free Tools</a><a href="#how-it-works" onClick={() => setMobileOpen(false)}>How it works</a><a href="#platforms" onClick={() => setMobileOpen(false)}>Supported platforms</a><a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a><div className="flex items-center gap-4 border-t border-[#e4e5de] pt-4 dark:border-white/10"><button onClick={() => toggleTheme?.()} className="flex items-center gap-2">{dark ? <Sun size={16} /> : <Moon size={16} />} Theme</button>{isPro ? (
+)}</div><button className="flex size-10 items-center justify-center rounded-full border border-[#e1e2da] md:hidden dark:border-white/10" aria-label="Open navigation" onClick={() => setMobileOpen((value) => !value)}>{mobileOpen ? <X size={19} /> : <Menu size={19} />}</button></div>{mobileOpen && <div className="container border-t border-[#e4e5de] py-4 md:hidden dark:border-white/10"><div className="flex flex-col gap-4 text-sm font-semibold text-[#686b75] dark:text-[#b7bac6]"><a href="#tools" onClick={() => setMobileOpen(false)}>{t.nav.tools}</a><a href="#how-it-works" onClick={() => setMobileOpen(false)}>{t.nav.howItWorks}</a><a href="#platforms" onClick={() => setMobileOpen(false)}>{t.nav.platforms}</a><a href="#faq" onClick={() => setMobileOpen(false)}>{t.nav.faq}</a><div className="flex items-center justify-between border-t border-[#e4e5de] pt-4 dark:border-white/10"><div className="flex items-center gap-2.5"><LanguageSelector /><button onClick={() => toggleTheme?.()} className="flex items-center gap-2 text-xs font-bold">{dark ? <Sun size={16} /> : <Moon size={16} />}</button></div>{isPro ? (
   <button
     type="button"
     onClick={() => { setMobileOpen(false); openUpgradeModal(); }}
@@ -972,7 +935,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
   </button>
 )}</div></div></div>}</header>
 
-    <main id="top"><section className="relative overflow-hidden border-b border-[#e4e5de] dark:border-white/10"><div className="absolute left-[-8rem] top-[-10rem] size-[34rem] rounded-full bg-[#d8ef54]/20 blur-3xl dark:bg-[#d8ef54]/10" /><div className="absolute right-[-12rem] top-[10rem] size-[32rem] rounded-full bg-[#b8b7ff]/30 blur-3xl dark:bg-[#5e5ce6]/20" /><div className="container relative grid gap-12 py-12 sm:py-16 lg:grid-cols-[1.04fr_.96fr] lg:items-center lg:gap-16 lg:py-24"><div className="max-w-[680px] mx-auto lg:mx-0 flex flex-col items-center lg:items-start text-center lg:text-left"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#dfe0d8] bg-white/70 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-[#5e5ce6] shadow-[0_5px_20px_rgba(17,18,24,0.04)] dark:border-white/10 dark:bg-white/5"><Sparkles size={13} />{preset?.badgeText || "Media, made simple"}</div><h1 className="max-w-[720px] text-4xl sm:text-5xl lg:text-[4.75rem] font-black leading-[0.95] tracking-[-0.07em]">{preset ? (<>{preset.heroHeadline}<br /><span className="relative inline-block text-[#5e5ce6]">{preset.heroHighlight}<span className="absolute -bottom-1 left-1 h-2 w-[92%] rounded-full bg-[#d8ef54] sm:-bottom-2 sm:h-3" /></span><span className="relative z-10">.</span></>) : (<>Download media,<br /><span className="relative inline-block text-[#5e5ce6]">simply<span className="absolute -bottom-1 left-1 h-2 w-[92%] rounded-full bg-[#d8ef54] sm:-bottom-2 sm:h-3" /></span><span className="relative z-10">.</span></>)}</h1><p className="mt-6 max-w-[520px] text-[16px] leading-7 text-[#686b75] dark:text-[#b7bac6] sm:text-[18px] sm:leading-8">{preset?.heroSubheadline || "Paste a public social-media URL and get started in seconds. CBdrop keeps the workflow clear, lightweight, and permission-first."}</p><form onSubmit={handleAnalyze} noValidate className="mt-6 sm:mt-8 w-full max-w-[660px] text-left"><div className={`group relative flex flex-col gap-2 rounded-[22px] border bg-white p-1.5 sm:p-2 shadow-[0_18px_50px_rgba(36,38,51,0.10)] transition focus-within:border-[#5e5ce6] focus-within:ring-4 focus-within:ring-[#5e5ce6]/10 dark:bg-[#1a1c22] ${error ? "border-[#e17b72]" : "border-[#dedfd8] dark:border-white/10"}`}><div className="flex min-h-[54px] sm:min-h-[58px] items-center gap-2 sm:gap-3 px-2.5 sm:pl-4 sm:pr-[160px]"><Link2 size={19} className="shrink-0 text-[#8a8c95]" /><input ref={inputRef} value={url} onChange={(event) => setUrl(event.target.value)} onPaste={(event) => {
+    <main id="top"><section className="relative overflow-hidden border-b border-[#e4e5de] dark:border-white/10"><div className="absolute left-[-8rem] top-[-10rem] size-[34rem] rounded-full bg-[#d8ef54]/20 blur-3xl dark:bg-[#d8ef54]/10" /><div className="absolute right-[-12rem] top-[10rem] size-[32rem] rounded-full bg-[#b8b7ff]/30 blur-3xl dark:bg-[#5e5ce6]/20" /><div className="container relative grid gap-12 py-12 sm:py-16 lg:grid-cols-[1.04fr_.96fr] lg:items-center lg:gap-16 lg:py-24"><div className="max-w-[680px] mx-auto lg:mx-0 flex flex-col items-center lg:items-start text-center lg:text-left"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#dfe0d8] bg-white/70 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-[#5e5ce6] shadow-[0_5px_20px_rgba(17,18,24,0.04)] dark:border-white/10 dark:bg-white/5"><Sparkles size={13} />{preset?.badgeText || t.hero.badge}</div><h1 className="max-w-[720px] text-4xl sm:text-5xl lg:text-[4.75rem] font-black leading-[0.95] tracking-[-0.07em]">{preset ? (<>{preset.heroHeadline}<br /><span className="relative inline-block text-[#5e5ce6]">{preset.heroHighlight}<span className="absolute -bottom-1 left-1 h-2 w-[92%] rounded-full bg-[#d8ef54] sm:-bottom-2 sm:h-3" /></span><span className="relative z-10">.</span></>) : (<>{t.hero.headline1}<br /><span className="relative inline-block text-[#5e5ce6]">{t.hero.headlineHighlight}<span className="absolute -bottom-1 left-1 h-2 w-[92%] rounded-full bg-[#d8ef54] sm:-bottom-2 sm:h-3" /></span><span className="relative z-10">.</span></>)}</h1><p className="mt-6 max-w-[520px] text-[16px] leading-7 text-[#686b75] dark:text-[#b7bac6] sm:text-[18px] sm:leading-8">{preset?.heroSubheadline || t.hero.subheadline}</p><form onSubmit={handleAnalyze} noValidate className="mt-6 sm:mt-8 w-full max-w-[660px] text-left"><div className={`group relative flex flex-col gap-2 rounded-[22px] border bg-white p-1.5 sm:p-2 shadow-[0_18px_50px_rgba(36,38,51,0.10)] transition focus-within:border-[#5e5ce6] focus-within:ring-4 focus-within:ring-[#5e5ce6]/10 dark:bg-[#1a1c22] ${error ? "border-[#e17b72]" : "border-[#dedfd8] dark:border-white/10"}`}><div className="flex min-h-[54px] sm:min-h-[58px] items-center gap-2 sm:gap-3 px-2.5 sm:pl-4 sm:pr-[160px]"><Link2 size={19} className="shrink-0 text-[#8a8c95]" /><input ref={inputRef} value={url} onChange={(event) => setUrl(event.target.value)} onPaste={(event) => {
   const pastedText = event.clipboardData.getData("text");
   if (pastedText) {
     const clean = pastedText.trim();
@@ -981,7 +944,7 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
       triggerAutoAnalyze(clean);
     }
   }
-}} className="min-w-0 flex-1 bg-transparent text-[15px] font-medium text-[#111318] outline-none placeholder:text-[#9b9da5] dark:text-white" placeholder={preset?.inputPlaceholder || "Paste a YouTube, TikTok, or other social URL..."} aria-label="Media URL" type="text" autoCapitalize="none" autoCorrect="off" spellCheck="false" />{url ? (
+}} className="min-w-0 flex-1 bg-transparent text-[15px] font-medium text-[#111318] outline-none placeholder:text-[#9b9da5] dark:text-white" placeholder={preset?.inputPlaceholder || t.hero.placeholder} aria-label="Media URL" type="text" autoCapitalize="none" autoCorrect="off" spellCheck="false" />{url ? (
   <button
     type="button"
     onClick={() => {
@@ -1014,10 +977,10 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
     className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#f0f0ed] px-3 py-1.5 text-xs font-bold text-[#5e5ce6] transition hover:bg-[#e4e5de] hover:text-[#504ed1] active:scale-95 dark:bg-white/10 dark:text-[#d8ef54] dark:hover:bg-white/15"
     aria-label="Paste URL"
   >
-    <Clipboard size={14} />Paste
+    <Clipboard size={14} />{t.hero.pasteBtn}
   </button>
 
-)}</div><button type="submit" disabled={status === "analyzing" || status === "processing"} className="flex h-[52px] w-full items-center justify-center gap-2 rounded-[16px] bg-[#5e5ce6] px-6 text-sm font-black text-white shadow-[0_9px_20px_rgba(94,92,230,0.25)] transition hover:bg-[#504ed1] active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:absolute sm:bottom-2 sm:right-2 sm:top-2 sm:h-auto sm:w-auto">{status === "analyzing" ? <><Loader2 size={16} className="animate-spin" />Analyzing...</> : "Analyze URL"}<ChevronRight size={16} /></button></div>{error && <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-[#bd554c]"><CircleAlert size={15} />{error}</p>}</form><div className="mt-8 w-full max-w-[660px]">
+)}</div><button type="submit" disabled={status === "analyzing" || status === "processing"} className="flex h-[52px] w-full items-center justify-center gap-2 rounded-[16px] bg-[#5e5ce6] px-6 text-sm font-black text-white shadow-[0_9px_20px_rgba(94,92,230,0.25)] transition hover:bg-[#504ed1] active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:absolute sm:bottom-2 sm:right-2 sm:top-2 sm:h-auto sm:w-auto">{status === "analyzing" ? <><Loader2 size={16} className="animate-spin" />{t.hero.analyzingBtn}</> : t.hero.analyzeBtn}<ChevronRight size={16} /></button></div>{error && <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-[#bd554c]"><CircleAlert size={15} />{error}</p>}</form><div className="mt-8 w-full max-w-[660px]">
   <div className="mb-3 flex items-center justify-center gap-2.5 lg:justify-start">
     <div className="h-px flex-1 bg-gradient-to-l from-[#e4e5de] to-transparent dark:from-white/10 lg:hidden" />
     <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#7d8089] dark:text-[#9b9da5]">
@@ -1080,7 +1043,106 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
       <div id="results" ref={resultsRef} className="scroll-mt-8">
         {/* Results Ad Banner Slot (Hidden for Pro subscribers) */}
         <AdBanner slot="results" className="mb-6" />
-        {hasVideo ? (
+        {isPlaylist && media.playlistItems && media.playlistItems.length > 0 ? (
+          <div className="mx-auto max-w-5xl rounded-[24px] sm:rounded-[30px] border border-[#dedfd8] bg-white p-4 sm:p-6 lg:p-8 shadow-[0_24px_70px_rgba(36,38,51,0.08)] dark:border-white/10 dark:bg-[#1a1c22]">
+            {/* Playlist Header */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-[#eceee6] pb-5 dark:border-white/10">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#5e5ce6] to-[#8c8aff] text-white shadow-[0_8px_20px_rgba(94,92,230,0.35)]">
+                  <ListVideo size={24} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-[#f0efff] px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#5e5ce6] dark:bg-[#2b2754] dark:text-[#a5a2ff]">
+                      {media.platform} · {t.playlist.detected}
+                    </span>
+                    <span className="text-xs font-bold text-[#8a8d98]">
+                      {t.playlist.videosCount(media.playlistItems.length)}
+                    </span>
+                  </div>
+                  <h2 className="mt-1 text-lg sm:text-xl font-black tracking-tight text-[#111318] dark:text-white line-clamp-1">
+                    {media.title || "Playlist"}
+                  </h2>
+                </div>
+              </div>
+
+              {/* Download Entire Playlist ZIP */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={handleDownloadAll}
+                  disabled={isZipping}
+                  className="inline-flex h-11 w-full sm:w-auto items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#4d48f9] to-[#5a56fd] px-6 text-sm font-black text-white shadow-[0_8px_20px_rgba(83,79,252,0.32)] transition-all hover:brightness-105 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait"
+                >
+                  {isZipping ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>{t.playlist.zipping}</span>
+                    </>
+                  ) : (
+                    <>
+                      <FolderArchive size={17} strokeWidth={2.5} />
+                      <span>{t.playlist.downloadZip}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Video items list */}
+            <div className="mt-6 flex flex-col gap-3 max-h-[560px] overflow-y-auto pr-1">
+              {media.playlistItems.map((item, idx) => (
+                <div
+                  key={item.id || idx}
+                  className="group flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[#eceee6] bg-[#fbfbf8] p-3 sm:p-3.5 transition hover:border-[#bfbdfa] hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:border-white/20"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-black/5 dark:bg-white/10 text-xs font-black text-[#5e5ce6] dark:text-[#d8ef54]">
+                      #{idx + 1}
+                    </span>
+
+                    {item.thumbnailUrl ? (
+                      <div className="relative aspect-video w-24 sm:w-28 shrink-0 overflow-hidden rounded-xl bg-black">
+                        <img
+                          src={item.thumbnailUrl}
+                          alt={item.title}
+                          className="h-full w-full object-cover group-hover:scale-105 transition duration-300"
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = "none";
+                          }}
+                        />
+                      </div>
+                    ) : null}
+
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-xs sm:text-sm font-black text-[#111318] dark:text-white line-clamp-2">
+                        {item.title}
+                      </h3>
+                      {item.duration && (
+                        <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#8a8d98]">
+                          <Clock3 size={11} /> {item.duration}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        setUrl(item.url);
+                        handleAnalyzeWithUrl(item.url);
+                      }}
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-[#dedfd8] bg-white px-4 text-xs font-bold text-[#111318] shadow-xs transition hover:border-[#5e5ce6] hover:text-[#5e5ce6] dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:border-white/30"
+                    >
+                      <Download size={13} />
+                      <span>{t.playlist.downloadItem}</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : hasVideo ? (
         <div className="mx-auto max-w-4xl rounded-[22px] sm:rounded-[28px] border border-[#e5e6df] bg-white p-3.5 sm:p-5 md:p-6 shadow-[0_20px_50px_rgba(20,24,40,0.06)] transition-all dark:border-white/10 dark:bg-[#1a1c22]">
           <div className="grid gap-4 sm:gap-5 md:grid-cols-[240px_1fr] lg:grid-cols-[280px_1fr] items-start">
             
@@ -1364,210 +1426,8 @@ export default function Home({ preset }: { preset?: SeoToolPreset } = {}) {
             </div>
           </div>
 
-          {/* Active Download Progress Card */}
-          {activeDownload && (
-            <div className="mt-3.5 rounded-2xl border border-[#e5e6df] bg-[#fbfbf8] p-3.5 sm:p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                <div className="flex items-start sm:items-center gap-2.5 min-w-0">
-                  <div
-                    className={`flex size-9 shrink-0 items-center justify-center rounded-xl ${
-                      activeDownload.status === "completed"
-                        ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/80 dark:text-emerald-400"
-                        : activeDownload.status === "interrupted"
-                        ? "bg-amber-100 text-amber-600 dark:bg-amber-950/80 dark:text-amber-400"
-                        : activeDownload.status === "resuming"
-                        ? "bg-blue-100 text-blue-600 dark:bg-blue-950/80 dark:text-blue-400"
-                        : "bg-[#5e5ce6]/15 text-[#5e5ce6] dark:bg-[#d8ef54]/20 dark:text-[#d8ef54]"
-                    }`}
-                  >
-                    {activeDownload.status === "completed" ? (
-                      <CheckCircle2 size={18} strokeWidth={2.5} />
-                    ) : activeDownload.status === "interrupted" ? (
-                      <AlertCircle size={18} strokeWidth={2.5} />
-                    ) : activeDownload.status === "resuming" ? (
-                      <RefreshCw size={18} strokeWidth={2.5} className="animate-spin" />
-                    ) : (
-                      <ArrowDownToLine size={18} strokeWidth={2.5} className="animate-bounce" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <p className="truncate text-xs sm:text-sm font-black text-[#111318] dark:text-white max-w-[180px] sm:max-w-xs md:max-w-md" title={activeDownload.filename}>
-                        {activeDownload.filename}
-                      </p>
-                      <span className="rounded-md bg-black/5 dark:bg-white/10 px-1.5 py-0.2 text-[10px] font-black uppercase text-[#5e5ce6] dark:text-[#d8ef54]">
-                        {activeDownload.container} · {activeDownload.quality}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[11px] font-semibold text-[#8a8d98] dark:text-[#9ea1ae]">
-                      {activeDownload.status === "completed" && "Download complete · Saved to browser downloads"}
-                      {activeDownload.status === "resuming" && "Connection active · Resuming from last byte..."}
-                      {activeDownload.status === "downloading" && "Downloading · Fast direct stream"}
-                      {activeDownload.status === "preparing" && "Connecting to media stream..."}
-                      {activeDownload.status === "interrupted" && "Connection paused or network dropped · Waiting to resume"}
-                      {activeDownload.status === "error" && (activeDownload.error && !activeDownload.error.includes("[download]") && !activeDownload.error.includes("[youtube]") ? activeDownload.error : "Download failed · Stream disconnected. Tap retry.")}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${
-                      activeDownload.status === "completed"
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                        : activeDownload.status === "error"
-                        ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
-                        : activeDownload.status === "interrupted"
-                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 animate-pulse"
-                        : activeDownload.status === "resuming"
-                        ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
-                        : "bg-[#5e5ce6]/10 text-[#5e5ce6] dark:bg-[#d8ef54]/10 dark:text-[#d8ef54]"
-                    }`}
-                  >
-                    <span
-                      className={`size-1.5 rounded-full ${
-                        activeDownload.status === "completed"
-                          ? "bg-emerald-500"
-                          : activeDownload.status === "error"
-                          ? "bg-rose-500"
-                          : activeDownload.status === "interrupted"
-                          ? "bg-amber-500"
-                          : activeDownload.status === "resuming"
-                          ? "bg-blue-500 animate-ping"
-                          : "bg-[#5e5ce6] dark:bg-[#d8ef54] animate-pulse"
-                      }`}
-                    />
-                    <span>
-                      {activeDownload.status === "completed"
-                        ? "Completed"
-                        : activeDownload.status === "error"
-                        ? "Failed"
-                        : activeDownload.status === "interrupted"
-                        ? "Paused"
-                        : activeDownload.status === "resuming"
-                        ? "Resuming..."
-                        : activeDownload.status === "preparing"
-                        ? "Connecting..."
-                        : "Downloading"}
-                    </span>
-                  </span>
-                  <button
-                    onClick={() => setActiveDownload(null)}
-                    className="rounded-full p-1 text-[#8a8d98] hover:bg-[#f0f0ed] dark:text-[#9ea1ae] dark:hover:bg-white/10 transition"
-                    title="Dismiss"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Progress Bar */}
-              <div className="mt-3">
-                <div className="relative h-2 w-full overflow-hidden rounded-full bg-[#f0f0ed] dark:bg-white/10">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      activeDownload.status === "completed"
-                        ? "bg-emerald-500"
-                        : activeDownload.status === "interrupted"
-                        ? "bg-amber-500"
-                        : activeDownload.status === "resuming"
-                        ? "bg-gradient-to-r from-blue-500 to-indigo-500 animate-pulse"
-                        : "bg-gradient-to-r from-[#5e5ce6] to-[#d8ef54]"
-                    }`}
-                    style={{
-                      width:
-                        activeDownload.totalBytes > 0
-                          ? `${Math.min(
-                              100,
-                              Math.max(
-                                activeDownload.downloadedBytes > 0 ? 3 : 0,
-                                Math.round((activeDownload.downloadedBytes / activeDownload.totalBytes) * 100)
-                              )
-                            )}%`
-                          : activeDownload.status === "completed"
-                          ? "100%"
-                          : "40%",
-                    }}
-                  />
-                </div>
-
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-1 text-[11px] font-semibold text-[#686b75] dark:text-[#b7bac6]">
-                  <div>
-                    {activeDownload.downloadedBytes > 0 ? (
-                      <span>
-                        <strong className="text-[#111318] dark:text-white">
-                          {formatBytes(activeDownload.downloadedBytes)}
-                        </strong>
-                        {activeDownload.totalBytes > 0 && ` / ${formatBytes(activeDownload.totalBytes)}`}
-                        {activeDownload.totalBytes > 0 && (
-                          <span className="ml-1 text-[#8a8d98] dark:text-[#9ea1ae]">
-                            ({Math.round((activeDownload.downloadedBytes / activeDownload.totalBytes) * 100)}%)
-                          </span>
-                        )}
-                        {activeDownload.totalBytes > activeDownload.downloadedBytes && (
-                          <span className="ml-1.5 font-bold text-[#5e5ce6] dark:text-[#d8ef54]">
-                            · {formatBytes(activeDownload.totalBytes - activeDownload.downloadedBytes)} left
-                          </span>
-                        )}
-                      </span>
-                    ) : activeDownload.totalBytes > 0 ? (
-                      <span>
-                        Total size:{" "}
-                        <strong className="text-[#111318] dark:text-white">
-                          {formatBytes(activeDownload.totalBytes)}
-                        </strong>
-                      </span>
-                    ) : (
-                      <span>Determining file size...</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2.5">
-                    {activeDownload.speed > 0 && (
-                      <span className="font-bold text-[#5e5ce6] dark:text-[#d8ef54]">
-                        {formatSpeed(activeDownload.speed)}
-                      </span>
-                    )}
-                    {activeDownload.eta > 0 && activeDownload.status === "downloading" && (
-                      <span className="text-[#8a8d98] dark:text-[#9ea1ae]">
-                        {formatETA(activeDownload.eta)}
-                      </span>
-                    )}
-                    {activeDownload.status === "interrupted" && (
-                      <button
-                        onClick={() => triggerFileDownload(activeDownload.downloadUrl, activeDownload.filename)}
-                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[10px] font-black text-amber-700 dark:text-amber-300 hover:bg-amber-500/30 transition"
-                      >
-                        <RefreshCw size={11} />
-                        <span>Resume</span>
-                      </button>
-                    )}
-                    {activeDownload.status === "error" && (
-                      <button
-                        onClick={() => triggerFileDownload(activeDownload.downloadUrl, activeDownload.filename)}
-                        className="inline-flex items-center gap-1 rounded-full bg-rose-500/20 px-2.5 py-0.5 text-[10px] font-black text-rose-700 dark:text-rose-300 hover:bg-rose-500/30 transition"
-                      >
-                        <RefreshCw size={11} />
-                        <span>Retry</span>
-                      </button>
-                    )}
-                    {activeDownload.status === "completed" && (
-                      <button
-                        onClick={() => triggerFileDownload(activeDownload.downloadUrl, activeDownload.filename)}
-                        className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-black text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/30 transition"
-                      >
-                        <Download size={11} />
-                        <span>Save again</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Success Banner */}
-          {isSelectedJobCompleted && !activeDownload && (
+          {isSelectedJobCompleted && (
             <div className="mt-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl bg-[#f5f8df] p-3 sm:p-3.5 text-[#525f0e] dark:bg-[#252c16] dark:text-[#d2f54a] border border-[#e1ebad] dark:border-white/10">
               <div className="flex items-start gap-2.5">
                 <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-[#60700f] dark:text-[#d2f54a]" />

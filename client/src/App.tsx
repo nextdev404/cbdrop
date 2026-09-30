@@ -39,25 +39,31 @@ function Router() {
 //   to keep consistent foreground/background color across components
 // - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
 
+import { LanguageProvider } from "./contexts/LanguageContext";
+import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
+
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="dark"
-        switchable
-      >
-        <AuthProvider>
-          <ProProvider>
-            <TooltipProvider>
-              <Toaster />
-              <Router />
-              <UpgradeModal />
-              <AuthModal />
-              <ScrollToTop />
-            </TooltipProvider>
-          </ProProvider>
-        </AuthProvider>
-      </ThemeProvider>
+      <LanguageProvider>
+        <ThemeProvider
+          defaultTheme="dark"
+          switchable
+        >
+          <AuthProvider>
+            <ProProvider>
+              <TooltipProvider>
+                <Toaster />
+                <Router />
+                <UpgradeModal />
+                <AuthModal />
+                <ScrollToTop />
+                <PwaInstallPrompt />
+              </TooltipProvider>
+            </ProProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </LanguageProvider>
     </ErrorBoundary>
   );
 }

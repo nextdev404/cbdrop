@@ -1,0 +1,26 @@
+{
+  "name": "CBdrop — Free Video & Playlist Downloader",
+  "short_name": "CBdrop",
+  "description": "Download YouTube, TikTok, Instagram, Facebook, X, and Snapchat videos and full playlists in 4K, 1080p, MP3, and ZIP.",
+  "start_url": "/?src=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#111318",
+  "theme_color": "#5e5ce6",
+  "categories": ["utilities", "multimedia", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

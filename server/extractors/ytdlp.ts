@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
-import type { ExtractedFormat, ExtractedMedia } from "./types";
+import type { ExtractedFormat, ExtractedMedia, PlaylistItem } from "./types";
 
 const execFileAsync = promisify(execFile);
 const SUPPORTED_HOSTS = new Map<string, string>([
@@ -236,12 +236,78 @@ export function normalizeYtDlpResult(raw: Record<string, unknown>): ExtractedMed
     }
   }
 
+  const isPlaylist =
+    raw._type === "playlist" ||
+    raw.extractor_key === "YoutubePlaylist" ||
+    raw.extractor_key === "YoutubeTab" ||
+    (rawEntries.length > 0 && raw._type !== "multi_video" && (!raw.formats || (raw.formats as unknown[]).length === 0));
+
+  let playlistItems: PlaylistItem[] | undefined;
+  if (isPlaylist && rawEntries.length > 0) {
+    playlistItems = rawEntries
+      .map((e, i) => {
+        const itemUrl =
+          typeof e.url === "string" && e.url.startsWith("http")
+            ? e.url
+            : typeof e.id === "string"
+              ? `https://www.youtube.com/watch?v=${e.id}`
+              : "";
+        const itemTitle = typeof e.title === "string" && e.title.trim() ? e.title.trim() : `Video ${i + 1}`;
+        let thumb: string | undefined = typeof e.thumbnail === "string" ? e.thumbnail : undefined;
+        if (!thumb && Array.isArray(e.thumbnails) && e.thumbnails.length > 0) {
+          thumb = (e.thumbnails[e.thumbnails.length - 1] as Record<string, unknown>)?.url as string;
+        }
+        if (!thumb && typeof e.id === "string") {
+          thumb = `https://i.ytimg.com/vi/${e.id}/hqdefault.jpg`;
+        }
+        let durStr: string | undefined;
+        if (typeof e.duration === "number" && e.duration > 0) {
+          const m = Math.floor(e.duration / 60);
+          const s = Math.floor(e.duration % 60);
+          durStr = `${m}:${s < 10 ? "0" : ""}${s}`;
+        }
+        return {
+          id: String(e.id || i + 1),
+          title: itemTitle,
+          url: itemUrl,
+          duration: durStr,
+          thumbnailUrl: thumb,
+        };
+      })
+      .filter((item) => Boolean(item.url));
+
+    if (formats.length === 0 && playlistItems.length > 0) {
+      formats.push(
+        {
+          id: "playlist-zip-1080p",
+          url: "playlist://zip",
+          ext: "zip",
+          formatNote: `Whole playlist as ZIP (${playlistItems.length} videos · up to 1080p)`,
+        },
+        {
+          id: "playlist-zip-720p",
+          url: "playlist://zip",
+          ext: "zip",
+          formatNote: `Whole playlist as ZIP (${playlistItems.length} videos · 720p)`,
+        },
+        {
+          id: "playlist-zip-mp3",
+          url: "playlist://zip",
+          ext: "zip",
+          formatNote: `Whole playlist audio as ZIP (${playlistItems.length} tracks · MP3)`,
+        }
+      );
+    }
+  }
+
   const id = String(raw.id || rawEntries[0]?.id || "media");
   const title = typeof raw.title === "string" && raw.title.trim()
     ? raw.title
     : typeof rawEntries[0]?.title === "string" && (rawEntries[0].title as string).trim()
       ? (rawEntries[0].title as string)
-      : "Social media post";
+      : isPlaylist
+        ? "Playlist Collection"
+        : "Social media post";
 
   if ((!raw.id && !rawEntries.length) || (formats.length === 0 && thumbnails.length === 0))
     throw new Error("No downloadable video or image was found for this URL.");
@@ -266,6 +332,8 @@ export function normalizeYtDlpResult(raw: Record<string, unknown>): ExtractedMed
     thumbnails: thumbnails.length > 0 ? thumbnails : undefined,
     webpageUrl: typeof raw.webpage_url === "string" ? raw.webpage_url : undefined,
     platform: isSnapchat ? "Snapchat" : typeof raw.extractor_key === "string" ? raw.extractor_key : undefined,
+    isPlaylist,
+    playlistItems,
     formats,
   };
 }
@@ -331,8 +399,40 @@ export function getExecutablePath(): string {
 
 export function canonicalizeUrl(inputUrl: string): string {
   try {
-    const parsed = new URL(inputUrl);
+    let clean = inputUrl.trim();
+    if (clean.toLowerCase().startsWith("view-source:")) {
+      clean = clean.replace(/^view-source:\s*/i, "").trim();
+    }
+    const parsed = new URL(clean);
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+
+    // YouTube canonicalization (youtu.be, /shorts/, /embed/, /live/, m.youtube.com)
+    if (host === "youtu.be") {
+      const videoId = parsed.pathname.slice(1).split("/")[0].split("?")[0];
+      if (videoId && videoId.length >= 6) {
+        return `https://www.youtube.com/watch?v=${videoId}`;
+      }
+    }
+
+    if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+      const shortsMatch = parsed.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
+      if (shortsMatch) {
+        return `https://www.youtube.com/watch?v=${shortsMatch[1]}`;
+      }
+      const embedMatch = parsed.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+      if (embedMatch) {
+        return `https://www.youtube.com/watch?v=${embedMatch[1]}`;
+      }
+      const liveMatch = parsed.pathname.match(/\/live\/([a-zA-Z0-9_-]{6,})/);
+      if (liveMatch) {
+        return `https://www.youtube.com/watch?v=${liveMatch[1]}`;
+      }
+      const v = parsed.searchParams.get("v");
+      if (v) {
+        return `https://www.youtube.com/watch?v=${v}`;
+      }
+    }
+
     if (host === "instagram.com" || host === "instagr.am") {
       const match = parsed.pathname.match(/\b(reel|reels|p|tv)\/([a-zA-Z0-9_-]+)/i);
       if (match) {
@@ -361,8 +461,7 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
       (host.includes("facebook.com") && (parsed.pathname.startsWith("/share/") || parsed.pathname.startsWith("/story.php"))) ||
       host === "fb.watch" ||
       host === "vm.tiktok.com" ||
-      host === "vt.tiktok.com" ||
-      host === "youtu.be";
+      host === "vt.tiktok.com";
     if (isShortLink) {
       try {
         const isFb = host.includes("facebook.com") || host === "fb.watch";
@@ -398,10 +497,11 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
   const cookiesPath = getCookiesPath(platform);
 
   const isYouTube = targetUrl.includes("youtube.com") || targetUrl.includes("youtu.be");
-  const isYouTubeVideo = isYouTube && !targetUrl.includes("/post/") && !targetUrl.includes("/community");
+  const isPlaylist = targetUrl.includes("/playlist") || targetUrl.includes("list=") || targetUrl.includes("/channel/") || targetUrl.includes("/c/");
+  const isYouTubeVideo = isYouTube && !isPlaylist && !targetUrl.includes("/post/") && !targetUrl.includes("/community");
   const commonArgs = [
     "--dump-single-json",
-    ...(isYouTubeVideo ? ["--no-playlist"] : []),
+    ...(isPlaylist ? ["--flat-playlist"] : (isYouTubeVideo ? ["--no-playlist"] : [])),
     "--skip-download",
     "--no-warnings",
     "--ignore-no-formats-error",
@@ -409,9 +509,7 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
     "--remote-components", "ejs:github",
   ];
 
-  if (isYouTube) {
-    commonArgs.push("--extractor-args", "youtube:player_client=android,web");
-  }
+
 
   const ffmpegLocation = resolve(process.cwd(), "bin/ffmpeg");
   if (existsSync(ffmpegLocation)) {

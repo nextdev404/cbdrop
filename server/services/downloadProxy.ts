@@ -1,4 +1,4 @@
-import { existsSync, createReadStream, createWriteStream, mkdirSync, statSync } from "node:fs";
+import { existsSync, createReadStream, createWriteStream, mkdirSync, statSync, readdirSync, unlinkSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -6,7 +6,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { Readable, Transform } from "node:stream";
 import { spawn } from "node:child_process";
-import { getCookiesPath, getExecutablePath } from "../extractors/ytdlp";
+import { getCookiesPath, getExecutablePath, canonicalizeUrl } from "../extractors/ytdlp";
 
 const nanoid = (len = 12) => randomBytes(Math.ceil(len * 0.75)).toString("base64url").slice(0, len);
 const secret = () => process.env.JWT_SECRET || "cbdrop-development-download-secret";
@@ -42,6 +42,60 @@ export function cleanOldDownloads() {
   for (const [k, v] of activeDownloads.entries()) {
     if (v.lastUpdated < cutoff) activeDownloads.delete(k);
   }
+}
+
+/**
+ * Automatically purges temporary video files and merge cache older than 10 minutes.
+ * Prevents server disk from ever filling up (matches Dajiye's 10-minute auto-cleanup policy).
+ */
+export function cleanTempDiskCache(maxAgeMs = 10 * 60 * 1000) {
+  try {
+    const cacheDir = resolve(tmpdir(), "cbdrop_cache");
+    if (existsSync(cacheDir)) {
+      const now = Date.now();
+      const files = readdirSync(cacheDir);
+      for (const file of files) {
+        try {
+          const filePath = resolve(cacheDir, file);
+          const stats = statSync(filePath);
+          if (now - stats.mtimeMs > maxAgeMs) {
+            unlinkSync(filePath);
+            console.log(`[cleanTempDiskCache] Removed old cache file: ${file}`);
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn("[cleanTempDiskCache] Error cleaning cacheDir:", err);
+  }
+
+  // Also clean any stray .part, .ytdl, or leftover video files in the root older than 10 mins
+  try {
+    const cwdFiles = readdirSync(process.cwd());
+    const now = Date.now();
+    for (const file of cwdFiles) {
+      if (file.endsWith(".part") || file.endsWith(".ytdl")) {
+        try {
+          const p = resolve(process.cwd(), file);
+          const st = statSync(p);
+          if (now - st.mtimeMs > maxAgeMs) {
+            unlinkSync(p);
+            console.log(`[cleanTempDiskCache] Removed stray temp file: ${file}`);
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
+export function startPeriodicCleanup(intervalMs = 10 * 60 * 1000) {
+  cleanTempDiskCache();
+  cleanOldDownloads();
+  const timer = setInterval(() => {
+    cleanTempDiskCache();
+    cleanOldDownloads();
+  }, intervalMs);
+  timer.unref();
 }
 
 type DownloadPayload = {
@@ -785,6 +839,13 @@ function mergeVideoAudioWithFfmpeg(payload: DownloadPayload, req: Request, res: 
   });
 }
 
+// In-progress downloads map to deduplicate concurrent requests for the exact same stream
+const inProgressDownloads = new Map<string, Promise<string>>();
+
+export function clearInProgressDownloads() {
+  inProgressDownloads.clear();
+}
+
 export function streamYouTubeWithYtDlp(
   sourceUrl: string,
   formatId: string | undefined,
@@ -794,6 +855,13 @@ export function streamYouTubeWithYtDlp(
   token?: string,
   expectedSize?: number
 ) {
+  const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "webp", "gif", "avif"]);
+  if (IMAGE_EXTS.has((container || "").toLowerCase()) || IMAGE_EXTS.has((filename.split(".").pop() || "").toLowerCase())) {
+    res.status(400).send("Images cannot be processed by video streaming pipeline.");
+    return;
+  }
+
+  const canonicalUrl = canonicalizeUrl(sourceUrl);
   const ytdlpBin = getExecutablePath();
   const ffmpegBin = getFfmpegPath();
   const cookiesPath = getCookiesPath();
@@ -804,6 +872,15 @@ export function streamYouTubeWithYtDlp(
 
   // Map DASH format IDs to HLS equivalents which are authorized and do not trigger 403
   const HLS_MAP: Record<string, string> = {
+    // 4K (2160p) - use HLS format 625 instead of DASH 313/401
+    "313": "625",
+    "401": "625",
+    "315": "625",  // 4K 60fps
+    "272": "625",
+    // 1440p (2K) - use HLS if available, else best available
+    "400": "620",  // only if 620 exists, otherwise use best
+    "308": "620",
+    "271": "620",
     // 1080p
     "137": "270",
     "299": "312",
@@ -814,6 +891,7 @@ export function streamYouTubeWithYtDlp(
     "617": "617",
     "614": "614",
     // 720p
+    "22": "232",
     "136": "232",
     "298": "311",
     "311": "311",
@@ -828,6 +906,7 @@ export function streamYouTubeWithYtDlp(
     "231": "231",
     "606": "606",
     // 360p
+    "18": "230",
     "134": "230",
     "243": "230",
     "230": "230",
@@ -842,90 +921,95 @@ export function streamYouTubeWithYtDlp(
     "278": "269",
     "269": "269",
     "603": "603",
-    // 1440p (2K)
-    "400": "620",
-    "271": "620",
-    "308": "623",
-    "623": "623",
-    "620": "620",
-    // 2160p (4K)
-    "401": "625",
-    "313": "625",
-    "315": "628",
-    "628": "628",
-    "625": "625",
   };
 
   const FORMAT_HEIGHT_MAP: Record<string, number> = {
-    "401": 2160, "315": 2160, "313": 2160, "625": 2160, "628": 2160,
-    "400": 1440, "308": 1440, "271": 1440, "620": 1440, "623": 1440,
+    "625": 2160,
+    "620": 1440,
+    "401": 2160, "315": 2160, "313": 2160, "272": 2160,
+    "400": 1440, "308": 1440, "271": 1440,
     "137": 1080, "299": 1080, "312": 1080, "270": 1080, "248": 1080, "303": 1080, "617": 1080, "614": 1080,
-    "136": 720,  "298": 720,  "311": 720,  "232": 720,  "247": 720,  "302": 720,  "612": 720,  "609": 720,
+    "22": 720,   "136": 720,  "298": 720,  "311": 720,  "232": 720,  "247": 720,  "302": 720,  "612": 720,  "609": 720,
     "135": 480,  "244": 480,  "231": 480,  "606": 480,
-    "134": 360,  "243": 360,  "230": 360,  "605": 360,
+    "18": 360,   "134": 360,  "243": 360,  "230": 360,  "605": 360,
     "133": 240,  "242": 240,  "229": 240,  "604": 240,
     "160": 144,  "278": 144,  "269": 144,  "603": 144,
   };
-
-  // YouTube HLS AAC audio streams (itag 234 / 233, including language suffixed like 234-13)
-  // are authorized via manifest and bypass all 403 blocks.
-  const HLS_AUDIO = "234/233/bestaudio[protocol^=m3u8]/bestaudio[ext=m4a]/bestaudio/best";
 
   const isYouTube = sourceUrl.includes("youtube.com") || sourceUrl.includes("youtu.be");
   let formatArg: string;
   if (isYouTube) {
     const targetHeight =
       (videoFormatId ? FORMAT_HEIGHT_MAP[videoFormatId] : undefined) ||
-      (formatId?.match(/(\d+)p?/)?.[1] ? parseInt(formatId.match(/(\d+)p?/)![1], 10) : undefined);
+      (formatId?.match(/(\d+)p\b/i)?.[1] ? parseInt(formatId.match(/(\d+)p\b/i)![1], 10) : undefined);
 
     if (isAudio) {
       if (container === "weba" || container === "opus") {
         formatArg = rawFormatId
-          ? `${rawFormatId}/251/250/249/ba[ext=webm]/ba/bestaudio/best`
-          : "251/250/249/ba[ext=webm]/ba/bestaudio/best";
+          ? `${rawFormatId}/ba[protocol^=m3u8]/ba[ext=webm]/251/250/249/ba/bestaudio/best`
+          : "ba[protocol^=m3u8]/ba[ext=webm]/251/250/249/ba/bestaudio/best";
       } else {
         formatArg = rawFormatId
-          ? `${rawFormatId}/${HLS_AUDIO}/140/ba/bestaudio/best`
-          : `${HLS_AUDIO}/140/ba/bestaudio/best`;
+          ? `${rawFormatId}/ba[protocol^=m3u8]/234/233/140/ba[ext=m4a]/ba/bestaudio/best`
+          : "ba[protocol^=m3u8]/234/233/140/ba[ext=m4a]/ba/bestaudio/best";
       }
-    } else if (container === "webm") {
-      const hlsId = videoFormatId ? HLS_MAP[videoFormatId] : undefined;
-      const primaryVideo = hlsId || videoFormatId || "628";
-      const heightFilter = targetHeight ? `[height<=${targetHeight}]` : "";
-      const candidates: string[] = [];
-      if (primaryVideo) {
-        candidates.push(`${primaryVideo}+251`, `${primaryVideo}+${HLS_AUDIO}`);
-      }
-      if (videoFormatId && videoFormatId !== primaryVideo) {
-        candidates.push(`${videoFormatId}+251`, `${videoFormatId}+${HLS_AUDIO}`);
-      }
-      candidates.push(
-        `bestvideo${heightFilter}[ext=webm]+bestaudio[ext=webm]`,
-        `bestvideo${heightFilter}[vcodec^=vp9]+bestaudio`,
-        `bestvideo${heightFilter}+bestaudio`,
-        `bv*${heightFilter}+ba`,
-        "bv*+ba/b/best"
-      );
-      formatArg = candidates.join("/");
-    } else if (videoFormatId) {
-      const hlsId = HLS_MAP[videoFormatId];
-      const heightFilter = targetHeight ? `[height<=${targetHeight}]` : "";
-      const candidates: string[] = [];
-      if (hlsId && hlsId !== videoFormatId) {
-        candidates.push(`${hlsId}+${HLS_AUDIO}`, `${hlsId}+140`);
-      }
-      candidates.push(`${videoFormatId}+${HLS_AUDIO}`, `${videoFormatId}+140`);
-      candidates.push(
-        `bestvideo${heightFilter}[vcodec^=avc1]+bestaudio[ext=m4a]`,
-        `bestvideo${heightFilter}[ext=mp4]+bestaudio[ext=m4a]`,
-        `bestvideo${heightFilter}+bestaudio[ext=m4a]`,
-        `bestvideo${heightFilter}+bestaudio`,
-        `bv*${heightFilter}+ba`,
-        "bv*+ba/b/best"
-      );
-      formatArg = candidates.join("/");
     } else {
-      formatArg = `270+${HLS_AUDIO}/232+${HLS_AUDIO}/bv*[height<=1080]+ba/bv*+ba/b/best`;
+      const hlsId = videoFormatId ? HLS_MAP[videoFormatId] : undefined;
+      const heightFilter = targetHeight ? `[height<=${targetHeight}]` : "";
+      const isWebm = container === "webm";
+
+      // Video candidates in priority order:
+      // 1. Authorized HLS if available (for 1080p, 720p, etc.)
+      // 2. Direct exact requested videoFormatId (e.g. 313 for 4K WebM, 401 for 4K MP4, 137 for 1080p MP4)
+      const videoCandidates: string[] = [];
+      if (hlsId) videoCandidates.push(hlsId);
+      if (videoFormatId && !videoCandidates.includes(videoFormatId)) videoCandidates.push(videoFormatId);
+
+      // Audio candidates (MUST prioritize HLS audio ba[protocol^=m3u8], 234, 233 to avoid 403 Forbidden)
+      const audioCandidates = isWebm
+        ? ["ba[protocol^=m3u8]", "234", "233", "ba[ext=webm]", "ba", "251", "250", "249"]
+        : ["ba[protocol^=m3u8]", "234", "233", "140", "ba[ext=m4a]", "ba"];
+
+      const pairs: string[] = [];
+      for (const v of videoCandidates) {
+        for (const a of audioCandidates) {
+          pairs.push(`${v}+${a}`);
+        }
+      }
+
+      // Height-filtered generic fallbacks
+      const minHeight = targetHeight
+        ? (targetHeight >= 2160 ? 1440 : targetHeight >= 1440 ? 1080 : targetHeight >= 1080 ? 720 : targetHeight >= 720 ? 480 : 0)
+        : 0;
+      const minHeightFilter = minHeight > 0 ? `[height>=${minHeight}]` : "";
+
+      if (isWebm) {
+        pairs.push(
+          `bestvideo${heightFilter}${minHeightFilter}[ext=webm]+ba[protocol^=m3u8]`,
+          `bestvideo${heightFilter}${minHeightFilter}[ext=webm]+bestaudio[ext=webm]`,
+          `bestvideo${heightFilter}${minHeightFilter}[vcodec^=vp9]+ba[protocol^=m3u8]`,
+          `bestvideo${heightFilter}${minHeightFilter}+ba[protocol^=m3u8]`,
+          `bestvideo${heightFilter}${minHeightFilter}+bestaudio`,
+          `bv*${heightFilter}${minHeightFilter}+ba[protocol^=m3u8]`,
+          `bv*${heightFilter}${minHeightFilter}+ba`
+        );
+      } else {
+        pairs.push(
+          `bestvideo${heightFilter}${minHeightFilter}[vcodec^=avc1]+ba[protocol^=m3u8]`,
+          `bestvideo${heightFilter}${minHeightFilter}[vcodec^=avc1]+bestaudio[ext=m4a]`,
+          `bestvideo${heightFilter}${minHeightFilter}[ext=mp4]+ba[protocol^=m3u8]`,
+          `bestvideo${heightFilter}${minHeightFilter}+ba[protocol^=m3u8]`,
+          `bestvideo${heightFilter}${minHeightFilter}+bestaudio`,
+          `bv*${heightFilter}${minHeightFilter}+ba[protocol^=m3u8]`,
+          `bv*${heightFilter}${minHeightFilter}+ba`
+        );
+      }
+
+      if (!targetHeight) {
+        pairs.push("bv*+ba");
+      }
+
+      formatArg = Array.from(new Set(pairs)).join("/");
     }
   } else {
     // Non-YouTube platforms (TikTok, Instagram, Twitter/X, Facebook, Snapchat, etc.)
@@ -938,134 +1022,40 @@ export function streamYouTubeWithYtDlp(
     }
   }
 
-  const ytdlpArgs = [
-    "--ffmpeg-location", ffmpegBin,
-    "-f", formatArg,
-    "--no-warnings",
-    "--no-playlist",
-    "--js-runtimes", "node",
-    "--remote-components", "ejs:github",
-  ];
-
-  if (isYouTube) {
-    ytdlpArgs.push("--extractor-args", "youtube:player_client=android,web");
-  }
-
-  if (cookiesPath) {
-    ytdlpArgs.push("--cookies", cookiesPath);
-  }
-
-  ytdlpArgs.push("-o", "-", sourceUrl);
-  console.log("[streamYouTubeWithYtDlp] formatArg:", formatArg, "cmd:", ytdlpArgs.join(" "));
-
-  const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "webp", "gif", "avif"]);
-  if (IMAGE_EXTS.has((container || "").toLowerCase()) || IMAGE_EXTS.has((filename.split(".").pop() || "").toLowerCase())) {
-    res.status(400).send("Images cannot be processed by video streaming pipeline.");
-    return;
-  }
-
   const baseName = filename.replace(/\.[a-z0-9]+$/i, "");
-  let ffmpegArgs: string[];
   let contentType: string;
   let outFilename: string;
 
   if (container === "mp3") {
     contentType = "audio/mpeg";
     outFilename = `${baseName}.mp3`;
-    ffmpegArgs = [
-      "-hide_banner",
-      "-loglevel", "error",
-      "-i", "pipe:0",
-      "-vn",
-      "-c:a", "libmp3lame",
-      "-b:a", "192k",
-      "-f", "mp3",
-      "pipe:1",
-    ];
   } else if (container === "m4a") {
     contentType = "audio/mp4";
     outFilename = `${baseName}.m4a`;
-    ffmpegArgs = [
-      "-hide_banner",
-      "-loglevel", "error",
-      "-i", "pipe:0",
-      "-vn",
-      "-c:a", "aac",
-      "-b:a", "192k",
-      "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-      "-f", "mp4",
-      "pipe:1",
-    ];
   } else if (container === "weba" || container === "opus") {
     contentType = "audio/webm";
     outFilename = `${baseName}.weba`;
-    ffmpegArgs = [
-      "-hide_banner",
-      "-loglevel", "error",
-      "-i", "pipe:0",
-      "-vn",
-      "-c:a", "libopus",
-      "-b:a", "128k",
-      "-f", "webm",
-      "pipe:1",
-    ];
   } else if (container === "wav") {
     contentType = "audio/wav";
     outFilename = `${baseName}.wav`;
-    ffmpegArgs = [
-      "-hide_banner",
-      "-loglevel", "error",
-      "-i", "pipe:0",
-      "-vn",
-      "-c:a", "pcm_s16le",
-      "-f", "wav",
-      "pipe:1",
-    ];
   } else if (container === "webm") {
     contentType = "video/webm";
     outFilename = `${baseName}.webm`;
-    ffmpegArgs = [
-      "-hide_banner",
-      "-loglevel", "error",
-      "-i", "pipe:0",
-      "-c:v", "copy",
-      "-c:a", "libopus",
-      "-ar", "48000",
-      "-b:a", "128k",
-      "-f", "matroska",
-      "pipe:1",
-    ];
   } else {
     contentType = "video/mp4";
     outFilename = `${baseName}.mp4`;
-    ffmpegArgs = [
-      "-hide_banner",
-      "-loglevel", "error",
-      "-i", "pipe:0",
-      "-c:v", "copy",
-      "-c:a", "aac",
-      "-b:a", "192k",
-      "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-      "-f", "mp4",
-      "pipe:1",
-    ];
   }
 
-  const ytdlp = spawn(ytdlpBin, ytdlpArgs, { stdio: ["ignore", "pipe", "pipe"] });
-  const ffmpeg = spawn(ffmpegBin, ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
+  const cacheDir = resolve(tmpdir(), "cbdrop_cache");
+  if (!existsSync(cacheDir)) {
+    try { mkdirSync(cacheDir, { recursive: true }); } catch {}
+  }
 
-  ytdlp.stdout.on("error", () => {});
-  ffmpeg.stdin.on("error", () => {});
-  ffmpeg.stdout.on("error", () => {});
+  const cacheKey = createHmac("sha256", secret()).update(`${canonicalUrl}_${formatArg}_${container}`).digest("hex").slice(0, 24);
+  const targetExt = container === "weba" ? "webm" : container;
+  const finalFilePath = resolve(cacheDir, `${cacheKey}.${targetExt}`);
 
-  ytdlp.stdout.pipe(ffmpeg.stdin);
-
-  let headersSent = false;
-  let ytdlpStderr = "";
-  let ffmpegStderr = "";
-  let deliveredBytes = 0;
   const targetTotal = expectedSize || 0;
-
   if (token) {
     activeDownloads.set(token, {
       token,
@@ -1080,127 +1070,301 @@ export function streamYouTubeWithYtDlp(
     });
   }
 
-  let lastTrackTime = Date.now();
-  let bytesSinceLastTrack = 0;
+  const serveCompletedFile = (filePath: string, targetRes: Response) => {
+    try {
+      const stats = statSync(filePath);
+      const totalSize = stats.size;
+      const actualExt = filePath.split(".").pop()?.toLowerCase() || "mp4";
+      const actualContentType =
+        actualExt === "webm"
+          ? "video/webm"
+          : actualExt === "mkv"
+          ? "video/x-matroska"
+          : actualExt === "mp3"
+          ? "audio/mpeg"
+          : actualExt === "m4a"
+          ? "audio/mp4"
+          : "video/mp4";
+      const effectiveFilename = outFilename.replace(/\.[a-z0-9]+$/i, `.${actualExt}`);
 
-  ytdlp.stderr.on("data", (chunk) => {
-    ytdlpStderr += chunk.toString();
-  });
+      const reqHeaders = (targetRes.req as any)?.headers || {};
+      const rangeHeader = reqHeaders.range;
+      if (rangeHeader) {
+        const m = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
+        if (m) {
+          const start = parseInt(m[1], 10);
+          const end = m[2] ? parseInt(m[2], 10) : totalSize - 1;
+          if (start < totalSize) {
+            const finalEnd = Math.min(end, totalSize - 1);
+            const chunkSize = finalEnd - start + 1;
+            targetRes.status(206)
+              .setHeader("content-type", actualContentType)
+              .setHeader("content-disposition", `attachment; filename="${effectiveFilename}"`)
+              .setHeader("accept-ranges", "bytes")
+              .setHeader("content-range", `bytes ${start}-${finalEnd}/${totalSize}`)
+              .setHeader("content-length", String(chunkSize))
+              .setHeader("cache-control", "private, max-age=3600");
+            const stream = createReadStream(filePath, { start, end: finalEnd });
+            stream.pipe(targetRes);
+            return;
+          }
+        }
+      }
 
-  ffmpeg.stderr.on("data", (chunk) => {
-    ffmpegStderr += chunk.toString();
-  });
+      targetRes.status(200)
+        .setHeader("content-type", actualContentType)
+        .setHeader("content-disposition", `attachment; filename="${effectiveFilename}"`)
+        .setHeader("content-length", String(totalSize))
+        .setHeader("accept-ranges", "bytes")
+        .setHeader("cache-control", "private, max-age=3600");
 
-  ffmpeg.stdout.on("data", (chunk: Buffer) => {
-    deliveredBytes += chunk.length;
-    bytesSinceLastTrack += chunk.length;
-    const now = Date.now();
-    const elapsed = (now - lastTrackTime) / 1000;
-    if (elapsed >= 0.4 && token) {
-      const speed = Math.round(bytesSinceLastTrack / elapsed);
-      const remaining = Math.max(0, targetTotal - deliveredBytes);
-      const eta = speed > 0 && remaining > 0 ? Math.round(remaining / speed) : 0;
-      updateDownloadProgress(token, {
-        status: "downloading",
-        downloadedBytes: deliveredBytes,
-        totalBytes: targetTotal > deliveredBytes ? targetTotal : deliveredBytes,
-        speed,
-        eta,
+      let sentBytes = 0;
+      const stream = createReadStream(filePath);
+      stream.on("data", (chunk: string | Buffer) => {
+        sentBytes += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
+        if (token) {
+          updateDownloadProgress(token, {
+            status: sentBytes >= totalSize ? "completed" : "downloading",
+            downloadedBytes: sentBytes,
+            totalBytes: totalSize,
+          });
+        }
       });
-      lastTrackTime = now;
-      bytesSinceLastTrack = 0;
+      stream.on("end", () => {
+        if (token) {
+          updateDownloadProgress(token, {
+            status: "completed",
+            downloadedBytes: totalSize,
+            totalBytes: totalSize,
+            speed: 0,
+            eta: 0,
+          });
+        }
+      });
+      stream.pipe(targetRes);
+    } catch (err) {
+      console.error("[serveCompletedFile error]:", err);
+      if (!targetRes.headersSent) {
+        targetRes.status(500).send("Failed to stream completed file.");
+      }
     }
-  });
-
-  ffmpeg.stdout.once("data", (firstChunk) => {
-    headersSent = true;
-    res.status(200)
-      .setHeader("content-type", contentType)
-      .setHeader("content-disposition", `attachment; filename="${outFilename}"`)
-      .setHeader("accept-ranges", "bytes")
-      .setHeader("cache-control", "private, max-age=3600");
-    res.write(firstChunk);
-    ffmpeg.stdout.pipe(res);
-  });
-
-  const cleanup = () => {
-    if (!ytdlp.killed) ytdlp.kill("SIGTERM");
-    if (!ffmpeg.killed) ffmpeg.kill("SIGTERM");
   };
 
-  ytdlp.on("error", (err) => {
-    console.error("[yt-dlp stream error]:", err.message);
-    cleanup();
-    if (token) updateDownloadProgress(token, { status: "error", error: err.message });
-    if (!headersSent && !res.headersSent) {
-      res.status(502).send("Unable to start media stream: " + err.message);
-    } else if (!res.writableEnded) {
-      res.end();
-    }
-  });
-
-  ffmpeg.on("error", (err) => {
-    console.error("[ffmpeg stream error]:", err.message);
-    cleanup();
-    if (token) updateDownloadProgress(token, { status: "error", error: err.message });
-    if (!headersSent && !res.headersSent) {
-      res.status(502).send("Unable to process media stream: " + err.message);
-    } else if (!res.writableEnded) {
-      res.end();
-    }
-  });
-
-  ytdlp.on("close", (code) => {
-    if (code !== 0) {
-      console.warn(`[yt-dlp stream process exited with code ${code}]:`, ytdlpStderr.slice(-500));
-      const cleanError = ytdlpStderr
-        .split("\n")
-        .filter((l) => l.includes("ERROR:") || l.includes("error:"))
-        .map((l) => l.replace(/.*ERROR:\s*/i, "").trim())
-        .pop() || "Stream connection failed";
-      if (token) updateDownloadProgress(token, { status: "error", error: cleanError });
-      if (!headersSent && !res.headersSent) {
-        res.status(502).send("Stream extraction failed: " + cleanError);
-      }
-    }
-  });
-
-  ffmpeg.on("close", (code) => {
-    if (code !== 0) {
-      console.warn(`[ffmpeg stream process exited with code ${code}]:`, ffmpegStderr.slice(-500));
-      const cleanError = ffmpegStderr
-        .split("\n")
-        .filter((l) => l.includes("Error") || l.includes("Invalid"))
-        .map((l) => l.trim())
-        .pop() || "Stream processing failed";
-      if (token) updateDownloadProgress(token, { status: "error", error: cleanError });
-      if (!headersSent && !res.headersSent) {
-        res.status(502).send("Stream processing failed: " + cleanError);
+  // If already finished and cached on disk, serve immediately!
+  if (existsSync(finalFilePath)) {
+    try {
+      const st = statSync(finalFilePath);
+      if (st.size > 0) {
+        serveCompletedFile(finalFilePath, res);
         return;
       }
-    } else if (token) {
-      updateDownloadProgress(token, {
-        status: "completed",
-        downloadedBytes: deliveredBytes,
-        totalBytes: targetTotal > deliveredBytes ? targetTotal : deliveredBytes,
-        speed: 0,
-        eta: 0,
+    } catch {}
+  }
+
+  // If another request is currently downloading this same video to disk, wait for it!
+  if (inProgressDownloads.has(cacheKey)) {
+    inProgressDownloads.get(cacheKey)!
+      .then((actualPath) => {
+        if (!res.headersSent && !res.writableEnded) {
+          serveCompletedFile(actualPath, res);
+        }
+      })
+      .catch((err) => {
+        if (!res.headersSent && !res.writableEnded) {
+          res.status(502).send("Stream processing failed: " + err.message);
+        }
       });
-    }
-    if (!res.writableEnded) {
-      res.end();
-    }
+    return;
+  }
+
+  // Build yt-dlp arguments for disk download & merge
+  const outTemplate = resolve(cacheDir, `${cacheKey}.%(ext)s`);
+  const ytdlpArgs = [
+    "--ffmpeg-location", ffmpegBin,
+    "-f", formatArg,
+    "--no-warnings",
+    "--no-playlist",
+    "--js-runtimes", "node",
+    "--remote-components", "ejs:github",
+    "--retries", "10",
+    "--retry-sleep", "linear=1::3",
+    "--fragment-retries", "10",
+  ];
+
+
+
+  if (cookiesPath) {
+    ytdlpArgs.push("--cookies", cookiesPath);
+  }
+
+  if (isAudio) {
+    ytdlpArgs.push("-x", "--audio-format", container === "weba" ? "opus" : container);
+  } else {
+    const mergeFormat = container === "webm" ? "mp4" : (container || "mp4");
+    ytdlpArgs.push("--merge-output-format", mergeFormat);
+  }
+
+  ytdlpArgs.push("-o", outTemplate, canonicalUrl);
+  console.log("[streamYouTubeWithYtDlp] formatArg:", formatArg, "cmd:", ytdlpArgs.join(" "));
+
+  const downloadPromise = new Promise<string>((resolveJob, rejectJob) => {
+    const ytdlp = spawn(ytdlpBin, ytdlpArgs, { stdio: ["ignore", "pipe", "pipe"] });
+
+    let ytdlpStderr = "";
+    let lastTrackTime = Date.now();
+
+    const parseProgress = (chunkStr: string) => {
+      // Example: [download]  45.2% of  140.84MiB at    4.60MiB/s ETA 00:15
+      const match = chunkStr.match(/\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+~?(\d+(?:\.\d+)?)\s*([KMG]iB)(?:\s+at\s+(\d+(?:\.\d+)?)\s*([KMG]iB\/s))?(?:\s+ETA\s+(\d+:\d+(?::\d+)?))?/i);
+      if (match && token) {
+        const percent = parseFloat(match[1]);
+        const sizeVal = parseFloat(match[2]);
+        const sizeUnit = match[3].toLowerCase();
+        let total = sizeVal;
+        if (sizeUnit === "kib") total *= 1024;
+        else if (sizeUnit === "mib") total *= 1024 * 1024;
+        else if (sizeUnit === "gib") total *= 1024 * 1024 * 1024;
+
+        let speed = 0;
+        if (match[4] && match[5]) {
+          const spVal = parseFloat(match[4]);
+          const spUnit = match[5].toLowerCase();
+          if (spUnit.startsWith("kib")) speed = spVal * 1024;
+          else if (spUnit.startsWith("mib")) speed = spVal * 1024 * 1024;
+          else if (spUnit.startsWith("gib")) speed = spVal * 1024 * 1024 * 1024;
+        }
+
+        let etaSec = 0;
+        if (match[6]) {
+          const parts = match[6].split(":").map((p) => parseInt(p, 10));
+          if (parts.length === 2) etaSec = parts[0] * 60 + parts[1];
+          else if (parts.length === 3) etaSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+        }
+
+        const downloaded = Math.round((percent / 100) * total);
+        const now = Date.now();
+        if (now - lastTrackTime >= 350) {
+          updateDownloadProgress(token, {
+            status: "downloading",
+            downloadedBytes: downloaded,
+            totalBytes: total,
+            speed: Math.round(speed),
+            eta: etaSec,
+          });
+          lastTrackTime = now;
+        }
+      }
+    };
+
+    ytdlp.stdout?.on("data", (chunk) => {
+      parseProgress(chunk.toString());
+    });
+
+    ytdlp.stderr?.on("data", (chunk) => {
+      const str = chunk.toString();
+      ytdlpStderr += str;
+      parseProgress(str);
+    });
+
+    ytdlp.on("error", (err) => {
+      console.error("[yt-dlp error]:", err.message);
+      if (token) updateDownloadProgress(token, { status: "error", error: err.message });
+      rejectJob(err);
+    });
+
+    ytdlp.on("close", (code) => {
+      if (code !== 0) {
+        console.warn(`[yt-dlp process exited with code ${code}]:`, ytdlpStderr.slice(-500));
+        const cleanError = ytdlpStderr
+          .split("\n")
+          .filter((l) => l.includes("ERROR:") || l.includes("error:"))
+          .map((l) => l.replace(/.*ERROR:\s*/i, "").trim())
+          .pop() || "Stream connection failed";
+        if (token) updateDownloadProgress(token, { status: "error", error: cleanError });
+        // Clean up any partial download files to prevent stale cache
+        try {
+          const partFiles = readdirSync(cacheDir).filter(f => f.startsWith(cacheKey));
+          for (const pf of partFiles) {
+            try { unlinkSync(resolve(cacheDir, pf)); } catch {}
+          }
+        } catch {}
+        rejectJob(new Error(cleanError));
+        return;
+      }
+
+      try {
+        const files = readdirSync(cacheDir);
+        const matching = files.filter((f) => f.startsWith(cacheKey) && !f.endsWith(".part") && !f.endsWith(".ytdl"));
+        const found = matching.length > 0 ? resolve(cacheDir, matching[0]) : (existsSync(finalFilePath) ? finalFilePath : null);
+        if (!found) {
+          rejectJob(new Error("Completed file not found on disk."));
+          return;
+        }
+
+        // If WebM container was requested, ensure the final file is true WebM with Opus audio
+        if (container === "webm" && !found.endsWith(".webm")) {
+          const webmTarget = resolve(cacheDir, `${cacheKey}.webm`);
+          if (existsSync(webmTarget) && statSync(webmTarget).size > 0) {
+            resolveJob(webmTarget);
+            return;
+          }
+          console.log(`[streamYouTubeWithYtDlp] Remuxing to clean WebM (VP9 + Opus): ${found} -> ${webmTarget}`);
+          const remuxArgs = [
+            "-y",
+            "-i", found,
+            "-c:v", "copy",
+            "-c:a", "libopus",
+            "-b:a", "160k",
+            webmTarget,
+          ];
+          const remux = spawn(ffmpegBin, remuxArgs, { stdio: ["ignore", "pipe", "pipe"] });
+          let remuxStderr = "";
+          remux.stderr?.on("data", (chunk) => { remuxStderr += chunk.toString(); });
+          remux.on("close", (remuxCode) => {
+            if (remuxCode === 0 && existsSync(webmTarget)) {
+              try { unlinkSync(found); } catch {}
+              resolveJob(webmTarget);
+            } else {
+              console.warn("[WebM remux failed, serving original]:", remuxStderr);
+              resolveJob(found);
+            }
+          });
+          return;
+        }
+
+        resolveJob(found);
+      } catch (err) {
+        rejectJob(err instanceof Error ? err : new Error("Failed to locate cached file."));
+      }
+    });
+
+    res.on("close", () => {
+      if (!res.writableEnded && token) {
+        const state = activeDownloads.get(token);
+        if (state && state.status !== "completed") {
+          updateDownloadProgress(token, { status: "interrupted", speed: 0 });
+        }
+      }
+    });
   });
 
-  res.on("close", () => {
-    cleanup();
-    if (!res.writableEnded && token) {
-      const state = activeDownloads.get(token);
-      if (state && state.status !== "completed") {
-        updateDownloadProgress(token, { status: "interrupted", speed: 0 });
-      }
-    }
+  inProgressDownloads.set(cacheKey, downloadPromise);
+  downloadPromise.catch(() => {});
+  downloadPromise.finally(() => {
+    inProgressDownloads.delete(cacheKey);
   });
+
+  downloadPromise
+    .then((filePath) => {
+      if (!res.headersSent && !res.writableEnded) {
+        serveCompletedFile(filePath, res);
+      }
+    })
+    .catch((err) => {
+      if (!res.headersSent && !res.writableEnded) {
+        res.status(502).send("Stream extraction failed: " + err.message);
+      }
+    });
 }
 
 export function decodeZipToken(token: string): ZipDownloadPayload {

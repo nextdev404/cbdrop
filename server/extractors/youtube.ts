@@ -1,4 +1,5 @@
 import type { ExtractedFormat, ExtractedMedia } from "./types";
+import { canonicalizeUrl } from "./ytdlp";
 
 interface YtUltraMediaItem {
   url: string;
@@ -21,6 +22,7 @@ interface YtUltraResponse {
 
 export async function extractYouTubeWithYtUltra(youtubeUrl: string): Promise<ExtractedMedia | null> {
   try {
+    const canonicalUrl = canonicalizeUrl(youtubeUrl);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
@@ -30,7 +32,7 @@ export async function extractYouTubeWithYtUltra(youtubeUrl: string): Promise<Ext
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       },
-      body: JSON.stringify({ url: youtubeUrl.trim() }),
+      body: JSON.stringify({ url: canonicalUrl }),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
 

@@ -14,6 +14,14 @@ export type ExtractedFormat = {
   httpHeaders?: Record<string, string>;
 };
 
+export type PlaylistItem = {
+  id: string;
+  title: string;
+  url: string;
+  duration?: string;
+  thumbnailUrl?: string;
+};
+
 export type ExtractedMedia = {
   id: string;
   title: string;
@@ -23,5 +31,7 @@ export type ExtractedMedia = {
   thumbnails?: Array<{ url: string; width?: number; height?: number; id?: string }>;
   webpageUrl?: string;
   platform?: string;
+  isPlaylist?: boolean;
+  playlistItems?: PlaylistItem[];
   formats: ExtractedFormat[];
 };

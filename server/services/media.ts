@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 
 const nanoid = (len = 10) => randomBytes(Math.ceil(len * 0.75)).toString("base64url").slice(0, len);
-import { detectExtractorPlatform, extractWithYtDlp, parseFacebookHtml, isInstagramHtml, parseInstagramHtml } from "../extractors/ytdlp";
+import { detectExtractorPlatform, extractWithYtDlp, parseFacebookHtml, isInstagramHtml, parseInstagramHtml, canonicalizeUrl } from "../extractors/ytdlp";
 import { extractYouTubeWithYtUltra } from "../extractors/youtube";
-import type { ExtractedMedia, ExtractedFormat } from "../extractors/types";
+import type { ExtractedMedia, ExtractedFormat, PlaylistItem } from "../extractors/types";
 import { createDownloadProxyUrl, createZipDownloadUrl } from "./downloadProxy";
 
 export type MediaFormat = {
@@ -34,6 +34,8 @@ export type MediaAnalysis = {
   thumbnailUrl?: string;
   source: "approved-provider" | "extractor" | "demo";
   ready: boolean;
+  isPlaylist?: boolean;
+  playlistItems?: PlaylistItem[];
   formats: MediaFormat[];
 };
 
@@ -809,6 +811,8 @@ export function extractedToMedia(sourceUrl: string, extracted: ExtractedMedia): 
     thumbnailUrl: proxyThumbnailUrl,
     source: "extractor",
     ready: true,
+    isPlaylist: extracted.isPlaylist,
+    playlistItems: extracted.playlistItems,
     formats,
   };
 }
@@ -841,14 +845,15 @@ function demoMedia(sourceUrl: string): MediaAnalysis {
 }
 
 export async function resolveMedia(sourceUrl: string): Promise<MediaAnalysis> {
-  const platform = detectPlatform(sourceUrl);
+  const canonicalUrl = canonicalizeUrl(sourceUrl.trim());
+  const platform = detectPlatform(canonicalUrl);
   if (!platform) {
     throw new Error("Unsupported or invalid URL. Use a supported platform (YouTube, TikTok, Facebook, Instagram, Snapchat, X) or a direct video/image URL.");
   }
 
   // Direct Facebook page source HTML extraction
-  if (isFacebookHtml(sourceUrl)) {
-    const rawHtml = sourceUrl.replace(/^view-source:\s*/i, "").trim();
+  if (isFacebookHtml(canonicalUrl)) {
+    const rawHtml = canonicalUrl.replace(/^view-source:\s*/i, "").trim();
     const extracted = parseFacebookHtml(rawHtml);
     if (!extracted || extracted.formats.length === 0) {
       throw new Error(
@@ -861,8 +866,8 @@ export async function resolveMedia(sourceUrl: string): Promise<MediaAnalysis> {
   }
 
   // Direct Instagram page source HTML extraction
-  if (isInstagramHtml(sourceUrl)) {
-    const rawHtml = sourceUrl.replace(/^view-source:\s*/i, "").trim();
+  if (isInstagramHtml(canonicalUrl)) {
+    const rawHtml = canonicalUrl.replace(/^view-source:\s*/i, "").trim();
     const extracted = parseInstagramHtml(rawHtml);
     if (!extracted || extracted.formats.length === 0) {
       throw new Error(
@@ -874,10 +879,7 @@ export async function resolveMedia(sourceUrl: string): Promise<MediaAnalysis> {
     return media;
   }
 
-  let cleanUrl = sourceUrl.trim();
-  if (cleanUrl.toLowerCase().startsWith("view-source:")) {
-    cleanUrl = cleanUrl.replace(/^view-source:\s*/i, "").trim();
-  }
+  let cleanUrl = canonicalUrl;
 
   if (cleanUrl.includes("cbdrop-demo")) {
     return demoMedia(cleanUrl);
@@ -898,7 +900,8 @@ export async function resolveMedia(sourceUrl: string): Promise<MediaAnalysis> {
 
   // Social platform media extraction
   let extracted: ExtractedMedia | null = null;
-  if (platform === "YouTube") {
+  const isPlaylist = cleanUrl.includes("/playlist") || cleanUrl.includes("list=") || cleanUrl.includes("/channel/");
+  if (platform === "YouTube" && !isPlaylist) {
     try {
       extracted = await extractYouTubeWithYtUltra(cleanUrl);
     } catch (ytUltraError) {
@@ -925,6 +928,7 @@ export async function refreshMedia(mediaId: string): Promise<MediaAnalysis> {
 }
 
 export async function prepareDownload(sourceUrl: string, mediaId: string, formatId: string): Promise<DownloadJob & { format: MediaFormat; media: MediaAnalysis }> {
+  sourceUrl = canonicalizeUrl(sourceUrl);
   if (mediaId.startsWith("cf_")) {
     const media = await refreshMedia(mediaId);
     const format = media.formats.find((item) => item.id === formatId);
@@ -1070,6 +1074,7 @@ export async function prepareZipDownload(
   sourceUrl: string,
   mediaId: string
 ): Promise<{ downloadUrl: string; filename: string; totalImages: number }> {
+  sourceUrl = canonicalizeUrl(sourceUrl);
   let media: MediaAnalysis | undefined;
   if (mediaId.startsWith("extractor_")) {
     media = analysisCache.get(mediaId)?.media;
@@ -1078,9 +1083,31 @@ export async function prepareZipDownload(
     media = await resolveMedia(sourceUrl);
   }
 
+  // Handle playlist ZIP download
+  if (media.isPlaylist && media.playlistItems && media.playlistItems.length > 0) {
+    const playlistMediaItems = media.playlistItems.map((item, idx) => {
+      const safeItemName = `${String(idx + 1).padStart(2, "0")} - ${item.title.replace(/[^a-zA-Z0-9._ -]/g, "").slice(0, 60)}`;
+      return {
+        url: item.url,
+        filename: `${safeItemName}.mp4`,
+      };
+    });
+    const safeTitle = (media.title || "cbdrop-playlist")
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .slice(0, 40)
+      .replace(/^_+|_+$/g, "") || "cbdrop-playlist";
+    const zipFilename = `${safeTitle}.zip`;
+    const downloadUrl = createZipDownloadUrl(zipFilename, playlistMediaItems);
+    return {
+      downloadUrl,
+      filename: zipFilename,
+      totalImages: media.playlistItems.length,
+    };
+  }
+
   const imageFormats = media.formats.filter((f) => f.type === "image" && f.downloadUrl);
   if (imageFormats.length === 0) {
-    throw new Error("No images found in this post to download.");
+    throw new Error("No downloadable media items found in this post.");
   }
 
   const imageItems = imageFormats.map((f, idx) => {
