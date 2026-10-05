@@ -369,6 +369,12 @@ export function getCookiesPath(platform?: string): string | null {
         if (!c.includes("sessionid")) return null;
       } catch {}
     }
+    if (platform === "YouTube") {
+      try {
+        const c = readFileSync(rootCookies, "utf-8");
+        if (!c.includes("LOGIN_INFO") && !c.includes("SID")) return null;
+      } catch {}
+    }
     return rootCookies;
   }
   const serverCookies = resolve(process.cwd(), "server/cookies.txt");
@@ -377,6 +383,12 @@ export function getCookiesPath(platform?: string): string | null {
       try {
         const c = readFileSync(serverCookies, "utf-8");
         if (!c.includes("sessionid")) return null;
+      } catch {}
+    }
+    if (platform === "YouTube") {
+      try {
+        const c = readFileSync(serverCookies, "utf-8");
+        if (!c.includes("LOGIN_INFO") && !c.includes("SID")) return null;
       } catch {}
     }
     return serverCookies;
@@ -518,6 +530,10 @@ export async function extractWithYtDlp(inputUrl: string): Promise<ExtractedMedia
 
   if (platform === "Instagram") {
     commonArgs.push("--impersonate", "chrome-136");
+  }
+
+  if (isYouTube) {
+    commonArgs.push("--extractor-args", "youtube:player_client=web_embedded,android");
   }
 
   if (cookiesPath) {

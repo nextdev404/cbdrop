@@ -862,9 +862,10 @@ export function streamYouTubeWithYtDlp(
   }
 
   const canonicalUrl = canonicalizeUrl(sourceUrl);
+  const isYouTube = sourceUrl.includes("youtube.com") || sourceUrl.includes("youtu.be");
   const ytdlpBin = getExecutablePath();
   const ffmpegBin = getFfmpegPath();
-  const cookiesPath = getCookiesPath();
+  const cookiesPath = isYouTube ? getCookiesPath("YouTube") : getCookiesPath();
 
   const rawFormatId = formatId ? formatId.replace(/^extractor-/, "").replace(/-direct$/, "").replace(/-mp4$/, "") : undefined;
   const videoFormatId = rawFormatId ? (rawFormatId.includes("-") ? rawFormatId.split("-")[0] : rawFormatId) : undefined;
@@ -936,7 +937,6 @@ export function streamYouTubeWithYtDlp(
     "160": 144,  "278": 144,  "269": 144,  "603": 144,
   };
 
-  const isYouTube = sourceUrl.includes("youtube.com") || sourceUrl.includes("youtu.be");
   let formatArg: string;
   if (isYouTube) {
     const targetHeight =
@@ -968,7 +968,7 @@ export function streamYouTubeWithYtDlp(
       // Audio candidates (MUST prioritize HLS audio ba[protocol^=m3u8], 234, 233 to avoid 403 Forbidden)
       const audioCandidates = isWebm
         ? ["ba[protocol^=m3u8]", "234", "233", "ba[ext=webm]", "ba", "251", "250", "249"]
-        : ["ba[protocol^=m3u8]", "234", "233", "140", "ba[ext=m4a]", "ba"];
+        : ["ba[protocol^=m3u8]", "234", "233", "140", "ba[ext=m4a]", "ba", "251"];
 
       const pairs: string[] = [];
       for (const v of videoCandidates) {
@@ -1192,6 +1192,10 @@ export function streamYouTubeWithYtDlp(
   ];
 
 
+
+  if (isYouTube) {
+    ytdlpArgs.push("--extractor-args", "youtube:player_client=web_embedded,android");
+  }
 
   if (cookiesPath) {
     ytdlpArgs.push("--cookies", cookiesPath);
